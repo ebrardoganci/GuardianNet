@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GuardianNet Login</title>
+
+    <style>
+        body{
+            margin:0;
+            padding:0;
+            background-color:#0f172a;
+            font-family:Arial, Helvetica, sans-serif;
+
+            display:flex;
+            justify-content:center;
+            align-items:center;
+
+            height:100vh;
+        }
+
+        .login-box{
+            width:350px;
+            background:white;
+            padding:40px;
+            border-radius:15px;
+        }
+
+        h1{
+            text-align:center;
+            margin-bottom:30px;
+            color:#0f172a;
+        }
+
+        input{
+            width:100%;
+            padding:12px;
+            margin-bottom:15px;
+
+            border:1px solid #ccc;
+            border-radius:8px;
+
+            box-sizing:border-box;
+        }
+
+        button{
+            width:100%;
+            padding:12px;
+
+            border:none;
+            border-radius:8px;
+
+            background:#2563eb;
+            color:white;
+
+            font-size:16px;
+            cursor:pointer;
+        }
+
+        button:hover{
+            background:#1d4ed8;
+        }
+
+        .error-message{
+            background:#fee2e2;
+            color:#991b1b;
+            padding:10px;
+            border-radius:8px;
+            margin-bottom:15px;
+            font-size:14px;
+            text-align:center;
+        }
+
+        .info-text{
+            margin-top:18px;
+            text-align:center;
+            color:#64748b;
+            font-size:14px;
+        }
+    </style>
+
+</head>
+<body>
+
+    <div class="login-box">
+
+        <h1>GuardianNet</h1>
+
+        {% if messages %}
+            {% for message in messages %}
+                <div class="error-message">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+
+        <form method="post" action="{% url 'accounts:login' %}">
+            {% csrf_token %}
+
+            <input type="hidden" name="next" value="{{ next }}">
+
+            <input 
+                type="text" 
+                name="username" 
+                placeholder="Kullanıcı Adı"
+                required
+            >
+
+            <input 
+                type="password" 
+                name="password" 
+                placeholder="Şifre"
+                required
+            >
+
+            <button type="submit">
+                Giriş Yap
+            </button>
+
+        </form>
+
+        <div class="info-text">
+            Yetkisiz erişim girişimleri kayıt altına alınır.
+        </div>
+
+    </div>
+
+</body>
+</html>
