@@ -1,0 +1,30 @@
+{% load static %}
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}GuardianNet{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/style.css' %}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
+  <script src="{% static 'js/charts.js' %}" defer></script>
+  <script src="{% static 'js/dashboard.js' %}" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="{% url 'dashboard:index' %}">GuardianNet</a>
+    <nav>
+      <a href="{% url 'dashboard:index' %}">Dashboard</a><a href="{% url 'dashboard:devices' %}">Cihazlar</a>
+      <a href="{% url 'dashboard:alerts' %}">Uyarılar</a><a href="{% url 'dashboard:events' %}">Güvenlik Olayları</a>
+      <a href="{% url 'dashboard:reports' %}">Raporlar</a><a href="{% url 'dashboard:honeypot' %}">Honeypot</a>
+      <a href="{% url 'dashboard:settings' %}">Ayarlar</a>
+    </nav>
+  </aside>
+  <main class="main">
+    <header class="topbar"><span>Savunma Amaçlı Ağ İzleme</span><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="link-button">Çıkış ({{ request.user.username }})</button></form></header>
+    <section class="content">
+      {% for message in messages %}<div class="message">{{ message }}</div>{% endfor %}
+      {% block content %}{% endblock %}
+    </section>
+  </main>
+</body>
+</html>
