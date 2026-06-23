@@ -1,4 +1,5 @@
 import json
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -73,3 +74,15 @@ class DashboardMVPTests(TestCase):
             self.assertEqual(second["created"], 0)
             self.assertEqual(second["skipped"], 1)
             self.assertEqual(HoneypotEvent.objects.filter(is_mock=False).count(), 1)
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_monitoring_cycle_runs_with_skip_options(self):
+        output = StringIO()
+        call_command("run_monitoring_cycle", "--skip-scan", "--skip-honeypot", stdout=output)
+        text = output.getvalue()
+        self.assertIn("Scan: atlandi", text)
+        self.assertIn("Honeypot: atlandi", text)
+        self.assertIn("analysis: ARP=", text)
+        self.assertEqual(Device.objects.count(), 0)
+        self.assertEqual(HoneypotEvent.objects.count(), 0)
+        self.assertEqual(RiskSnapshot.objects.count(), 1)

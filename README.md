@@ -90,6 +90,18 @@ python manage.py analyze_security
 
 Risk puanı aktif uyarı, yüksek/kritik önem, güvenilmeyen cihaz, gerçek honeypot olayı ve son 24 saatteki savunma tespitlerine göre hesaplanır. `security_score = 100 - risk_score` olarak tutulur.
 
+## Monitoring Cycle
+
+Gerçek kullanımda ağ keşfi, OpenCanary log aktarımı ve risk analizini tek komutla çalıştırabilirsiniz:
+
+```powershell
+python manage.py run_monitoring_cycle
+python manage.py run_monitoring_cycle --scan-limit 10
+python manage.py run_monitoring_cycle --skip-honeypot
+```
+
+`--scan-limit` cihaz sayısını sabitlemez; yalnızca taranacak host hedeflerini sınırlar. Gerektiğinde `--skip-scan`, `--skip-honeypot` veya `--skip-analysis` ile bir adımı atlayabilirsiniz. Windows'ta gerçek ağ keşfi için Nmap ve Npcap kurulu olmalı; yoksa Scapy ARP keşfi denenir ve o da çalışmazsa real modda demo/fallback veri üretilmez.
+
 ## Test
 
 ```powershell
@@ -100,6 +112,7 @@ python manage.py migrate
 python manage.py run_network_scan
 python manage.py ingest_honeypot_logs
 python manage.py analyze_security
+python manage.py run_monitoring_cycle --scan-limit 10
 ```
 
 Bu sistem yalnızca kullanıcının kendi yerel ağı veya açıkça izin verilmiş test ağlarında kullanılmalıdır.
