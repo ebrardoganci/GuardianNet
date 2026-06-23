@@ -1,11 +1,13 @@
 services:
   opencanary:
     build: ./opencanary
-    profiles: ["honeypot"]
+    container_name: guardiannet-opencanary
+    init: true
     restart: unless-stopped
     ports:
-      - "2121:2121"
-      - "2222:2222"
-      - "8080:8080"
+      - "${OPENCANARY_FTP_PORT:-2121}:2121"
+      - "${OPENCANARY_SSH_PORT:-2222}:2222"
+      - "${OPENCANARY_HTTP_PORT:-8080}:8080"
     volumes:
-      - ./logs:/var/tmp/opencanary
+      - ./logs:/var/tmp/opencanary:rw
+      - ./opencanary/opencanary.conf:/etc/opencanaryd/opencanary.conf:ro

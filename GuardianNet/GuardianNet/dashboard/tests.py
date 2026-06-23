@@ -77,22 +77,65 @@ class DashboardMVPTests(TestCase):
     def test_honeypot_ingest_is_idempotent(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "opencanary.log"
-            payload = {
-                "event_id": "unit-test-honeypot-event",
-                "src_host": "198.51.100.10",
-                "dst_port": 22,
-                "local_time": "2026-01-01T10:00:00Z",
-                "logdata": {"USERNAME": "test", "COMMAND": "noop"},
+            source_ip = "10.10.10.50"
+            startup = {
+                "dst_host": "",
+                "dst_port": -1,
+                "local_time": "2026-01-01 09:59:59.000000",
+                "logdata": {"msg": {"logdata": "Canary running!!!"}},
+                "logtype": 1001,
+                "src_host": "",
+                "src_port": -1,
+                "utc_time": "2026-01-01 09:59:59.000000",
             }
-            path.write_text(json.dumps(payload) + "\n{not-json}\n", encoding="utf-8")
+            payload = {
+                "src_host": source_ip,
+                "src_port": 53210,
+                "dst_port": 2222,
+                "local_time": "2026-01-01 10:00:00.000000",
+                "utc_time": "2026-01-01 10:00:00.000000",
+                "logtype": 4002,
+                "logdata": {"USERNAME": "test", "PASSWORD": "sensitive-test-value"},
+            }
+            path.write_text(
+                "\n".join(["OpenCanary starting", json.dumps(startup), json.dumps(payload), "{not-json}"]) + "\n",
+                encoding="utf-8",
+            )
             first = ingest_honeypot_logs(path)
             second = ingest_honeypot_logs(path)
-            self.assertEqual(first["read"], 2)
+            self.assertEqual(first["read"], 4)
             self.assertEqual(first["created"], 1)
+            self.assertEqual(first["ignored"], 2)
             self.assertEqual(first["invalid"], 1)
             self.assertEqual(second["created"], 0)
             self.assertEqual(second["skipped"], 1)
+            self.assertEqual(second["ignored"], 2)
+            event = HoneypotEvent.objects.get(is_mock=False)
+            self.assertEqual(event.source_ip, source_ip)
+            self.assertEqual(event.service, "ssh")
+            self.assertEqual(event.destination_port, 2222)
+            self.assertEqual(event.username, "test")
+            self.assertIn("PASSWORD", event.raw_data["logdata"])
+            self.assertNotIn("sensitive-test-value", event.command)
             self.assertEqual(HoneypotEvent.objects.filter(is_mock=False).count(), 1)
+
+    @override_settings(ENABLE_HONEYPOT_LOGS=True)
+    def test_honeypot_ingest_ignores_non_event_lines_without_fake_events(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "opencanary.log"
+            startup = {
+                "dst_port": -1,
+                "logdata": {"msg": {"logdata": "Added service from class CanarySSH"}},
+                "logtype": 1001,
+                "src_host": "",
+            }
+            path.write_text("plain startup line\n" + json.dumps(startup) + "\n[]\n", encoding="utf-8")
+            result = ingest_honeypot_logs(path)
+            self.assertEqual(result["read"], 3)
+            self.assertEqual(result["created"], 0)
+            self.assertEqual(result["ignored"], 3)
+            self.assertEqual(result["invalid"], 0)
+            self.assertEqual(HoneypotEvent.objects.count(), 0)
 
     @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
     def test_monitoring_cycle_runs_with_skip_options(self):

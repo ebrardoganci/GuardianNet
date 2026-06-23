@@ -18,7 +18,8 @@ class Command(BaseCommand):
         message = (
             f"{result['message']} "
             f"Satir: {result.get('read', 0)}, eklendi: {result.get('created', 0)}, "
-            f"duplicate: {result.get('skipped', 0)}, parse hatasi: {result.get('invalid', 0)}. "
+            f"duplicate: {result.get('skipped', 0)}, ignored: {result.get('ignored', 0)}, "
+            f"parse hatasi: {result.get('invalid', 0)}. "
             f"Port tarama suphesi: {len(port_findings)}, SSH suphesi: {len(brute_findings)}"
         )
         self.stdout.write(self.style.SUCCESS(message) if result["success"] else self.style.WARNING(message))
