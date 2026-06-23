@@ -23,9 +23,9 @@ Arayüz: `http://127.0.0.1:8000/login/`
 
 - **Real:** Yalnızca RFC1918 özel ağlarında (`10/8`, `172.16/12`, `192.168/16`) cihaz keşfi dener. Otomatik algılanan ağ `/24` ile sınırlandırılır. Public IP taranmaz ve port taraması yapılmaz.
 - **Demo:** Dokümantasyon IP bloklarından sabit örnek kayıtlar kullanır.
-- Gerçek keşif veya OpenCanary başarısız olursa Django çalışmaya devam eder ve mevcut/demo kayıtları gösterilir.
+- Gerçek keşif veya OpenCanary logu yoksa Django çalışmaya devam eder; real modda demo/fallback kayıt üretilmez.
 
-`.env.example` desteklenen değişkenleri belgeler. Proje otomatik `.env` yüklemez; değerleri PowerShell, işletim sistemi veya IDE çalışma yapılandırmasına ekleyin. Aynı ayarlar web arayüzündeki Ayarlar sayfasından `SystemSetting` tablosuna da kaydedilebilir.
+`.env.example` desteklenen değişkenleri belgeler. Proje kökündeki `.env` otomatik yüklenir; `.env` dosyası kaynak kontrole eklenmemelidir. Aynı ayarlar web arayüzündeki Ayarlar sayfasından `SystemSetting` tablosuna da kaydedilebilir.
 
 ## Gerçek Cihaz Keşfi
 
@@ -34,7 +34,7 @@ Keşif sırası:
 1. `psutil` aktif özel IPv4 arayüzünü ve subnet'i belirler.
 2. Nmap varsa yalnızca host discovery için `nmap -sn` çalışır.
 3. Nmap yoksa Scapy ile yerel ARP discovery denenir.
-4. İkisi de kullanılamazsa hata `NetworkScan.notes` alanına yazılır ve fallback devreye girer.
+4. İkisi de kullanılamazsa hata `NetworkScan.notes` alanına yazılır; real modda demo/fallback cihaz üretilmez.
 
 Manuel `LOCAL_SUBNET`, yalnızca sahibi olduğunuz veya açıkça izin verilmiş özel ağ olmalıdır. Varsayılan host limiti 1024'tür.
 
@@ -50,14 +50,34 @@ WSL/Ubuntu, OpenCanary ve Linux ağ araçları için daha sorunsuz bir ortamdır
 
 ## OpenCanary
 
-Docker opsiyoneldir; Django Docker olmadan çalışır:
+Docker opsiyoneldir; Django Docker olmadan da çalışır. OpenCanary container'ı başlatmak için proje kökünde:
 
 ```powershell
 docker compose --profile honeypot up --build -d
+```
+
+Örnek servisler host üzerinde `2121` (FTP), `2222` (SSH) ve `8080` (HTTP) portlarını kullanır. OpenCanary JSON lines log hedefi repo kökündeki `logs/opencanary.log` dosyasıdır. `.env` içinde aynı dosyayı gösterin:
+
+```env
+OPENCANARY_LOG_PATH=logs/opencanary.log
+ENABLE_HONEYPOT_LOGS=True
+```
+
+Logları Django veritabanına aktarmak için `manage.py` dizininde çalıştırın:
+
+```powershell
 python manage.py ingest_honeypot_logs
 ```
 
-Örnek servisler host üzerinde `2121` (FTP), `2222` (SSH) ve `8080` (HTTP) portlarını kullanır. JSON log hedefi `logs/opencanary.log` dosyasıdır. Her log satırı içerik hash'iyle tekilleştirilir; parola alanları kaydedilmez.
+Komut kaç satır okunduğunu, kaç gerçek event eklendiğini, kaç duplicate atlandığını ve kaç parse hatası olduğunu raporlar. Log dosyası yoksa hata koduyla çıkmaz; dashboard Honeypot sayfasında “OpenCanary logu bulunamadı” görünür. Log dosyası var ama gerçek event yoksa “Henüz gerçek honeypot olayı yok” boş durumu gösterilir.
+
+Güvenli parser testi için otomatik kullanılmayan örnek dosya vardır:
+
+```powershell
+python manage.py ingest_honeypot_logs --path ..\..\logs\opencanary.sample.jsonl
+```
+
+Bu örnek gerçek OpenCanary yerine geçmez ve dashboard real modda kendiliğinden fake veri üretmez.
 
 ## Savunma Analizi
 

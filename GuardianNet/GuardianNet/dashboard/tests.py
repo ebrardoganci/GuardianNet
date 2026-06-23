@@ -57,8 +57,19 @@ class DashboardMVPTests(TestCase):
     def test_honeypot_ingest_is_idempotent(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "opencanary.log"
-            payload = {"src_host": "198.51.100.10", "dst_port": 22, "logdata": {"USERNAME": "test"}}
-            path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
-            self.assertEqual(ingest_honeypot_logs(path)["created"], 1)
-            self.assertEqual(ingest_honeypot_logs(path)["created"], 0)
+            payload = {
+                "event_id": "unit-test-honeypot-event",
+                "src_host": "198.51.100.10",
+                "dst_port": 22,
+                "local_time": "2026-01-01T10:00:00Z",
+                "logdata": {"USERNAME": "test", "COMMAND": "noop"},
+            }
+            path.write_text(json.dumps(payload) + "\n{not-json}\n", encoding="utf-8")
+            first = ingest_honeypot_logs(path)
+            second = ingest_honeypot_logs(path)
+            self.assertEqual(first["read"], 2)
+            self.assertEqual(first["created"], 1)
+            self.assertEqual(first["invalid"], 1)
+            self.assertEqual(second["created"], 0)
+            self.assertEqual(second["skipped"], 1)
             self.assertEqual(HoneypotEvent.objects.filter(is_mock=False).count(), 1)
