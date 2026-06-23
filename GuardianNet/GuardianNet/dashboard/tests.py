@@ -156,6 +156,37 @@ class DashboardMVPTests(TestCase):
         self.assertEqual(run.analysis_status, "completed")
 
     @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_dashboard_get_does_not_trigger_monitoring_cycle(self):
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("dashboard:run_monitoring_cycle"))
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(MonitoringCycleRun.objects.count(), 0)
+        self.assertEqual(Device.objects.count(), 0)
+        self.assertEqual(HoneypotEvent.objects.count(), 0)
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    @patch("dashboard.services.monitoring_cycle.run_security_analysis")
+    @patch("dashboard.services.monitoring_cycle.ingest_honeypot_logs")
+    @patch("dashboard.services.monitoring_cycle.scan_network")
+    def test_dashboard_post_triggers_monitoring_cycle_without_fake_data(self, scan, ingest, analysis):
+        scan.return_value = {"success": True, "is_mock": False, "found_devices": 0, "new_devices": 0}
+        ingest.return_value = {"success": True, "read": 0, "created": 0, "skipped": 0, "ignored": 0, "invalid": 0}
+        analysis.return_value = {"arp": 0, "port": 0, "ssh": 0, "risk": 0}
+        self.client.force_login(self.user)
+        response = self.client.post(reverse("dashboard:run_monitoring_cycle"), {"scan_limit": "7"})
+        self.assertRedirects(response, reverse("dashboard:index"))
+        scan.assert_called_once_with(limit=7)
+        ingest.assert_called_once_with()
+        analysis.assert_called_once_with()
+        self.assertEqual(MonitoringCycleRun.objects.count(), 1)
+        run = MonitoringCycleRun.objects.first()
+        self.assertEqual(run.status, "completed")
+        self.assertEqual(run.scan_found_devices, 0)
+        self.assertEqual(run.honeypot_ignored_lines, 0)
+        self.assertEqual(Device.objects.count(), 0)
+        self.assertEqual(HoneypotEvent.objects.count(), 0)
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
     def test_alert_status_update_requires_post_and_updates_status(self):
         self.client.force_login(self.user)
         device = Device.objects.create(ip_address="192.168.50.30", status="online")

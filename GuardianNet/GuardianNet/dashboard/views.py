@@ -12,6 +12,7 @@ from django.views.decorators.http import require_POST
 
 from .models import Alert, Device, HoneypotEvent, MonitoringCycleRun, NetworkScan, RiskSnapshot, SecurityEvent, SystemSetting
 from .services.honeypot_manager import get_honeypot_status
+from .services.monitoring_cycle import run_monitoring_cycle as execute_monitoring_cycle
 from .services.network_scanner import scan_network
 from .services.network_scanner import resolve_target_subnet
 from .services.data_scope import (
@@ -41,6 +42,37 @@ ALERT_STATUS_FILTERS = {
     "resolved": "Resolved",
 }
 ALERT_ACTION_STATUSES = {"active", "acknowledged", "resolved"}
+
+
+def _monitoring_scan_limit_default():
+    return str(get_value("monitoring_cycle_scan_limit", settings.MONITORING_CYCLE_SCAN_LIMIT) or "").strip()
+
+
+def _parse_scan_limit(raw_value):
+    raw_value = str(raw_value or "").strip()
+    if not raw_value:
+        return None
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Scan limiti pozitif bir tam sayi olmali.") from exc
+    if value <= 0:
+        raise ValueError("Scan limiti pozitif bir tam sayi olmali.")
+    return value
+
+
+def _cycle_message(result):
+    scan = result["scan_result"] or {}
+    honeypot = result["honeypot_result"] or {}
+    analysis = result["analysis_result"] or {}
+    return (
+        "Monitoring cycle tamamlandi. "
+        f"Scan found/new: {scan.get('found_devices', 0)}/{scan.get('new_devices', 0)}. "
+        f"Honeypot read/created/duplicate/ignored/parse: "
+        f"{honeypot.get('read', 0)}/{honeypot.get('created', 0)}/"
+        f"{honeypot.get('skipped', 0)}/{honeypot.get('ignored', 0)}/{honeypot.get('invalid', 0)}. "
+        f"Risk: {analysis.get('risk', 0)}."
+    )
 
 
 def _risk_context():
@@ -124,12 +156,34 @@ def index(request):
         "recent_events": events_qs[:6], "recent_alerts": alerts_qs[:6],
         "honeypot_status": get_honeypot_status(),
         "latest_monitoring_cycle": latest_cycle,
+        "monitoring_scan_limit_default": _monitoring_scan_limit_default(),
         "operation_mode": mode,
         "device_chart": {"labels": ["Online", "Offline", "Bilinmiyor"], "values": [online, offline, unknown]},
         "severity_chart": {"labels": ["Dusuk", "Orta", "Yuksek", "Kritik"], "values": [alerts_qs.filter(severity=value).count() for value in ["low", "medium", "high", "critical"]]},
         **_risk_context(),
     }
     return render(request, "dashboard/index.html", context)
+
+
+@login_required
+@require_POST
+def run_monitoring_cycle_view(request):
+    raw_limit = request.POST.get("scan_limit", "").strip() or _monitoring_scan_limit_default()
+    try:
+        scan_limit = _parse_scan_limit(raw_limit)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect("dashboard:index")
+
+    result = execute_monitoring_cycle(scan_limit=scan_limit)
+    message = _cycle_message(result)
+    if result["status"] == "completed":
+        messages.success(request, message)
+    elif result["status"] == "partial":
+        messages.warning(request, f"{message} Kismi hata: {result['error_summary']}")
+    else:
+        messages.error(request, f"Monitoring cycle basarisiz. {result['error_summary'] or message}")
+    return redirect("dashboard:index")
 
 
 @login_required

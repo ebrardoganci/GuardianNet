@@ -120,9 +120,11 @@ python manage.py run_monitoring_cycle --scan-limit 10
 python manage.py run_monitoring_cycle --skip-honeypot
 ```
 
+Dashboard ana sayfasındaki **Monitoring Cycle Çalıştır** butonu da aynı servis akışını POST ile çalıştırır. Formdaki scan limit alanı cihaz sayısını sabitlemez; yalnızca taranacak host hedeflerini sınırlar. Varsayılan değer `.env` içindeki `MONITORING_CYCLE_SCAN_LIMIT` ile değiştirilebilir.
+
 `--scan-limit` cihaz sayısını sabitlemez; yalnızca taranacak host hedeflerini sınırlar. Gerektiğinde `--skip-scan`, `--skip-honeypot` veya `--skip-analysis` ile bir adımı atlayabilirsiniz. Windows'ta gerçek ağ keşfi için Nmap ve Npcap kurulu olmalı; yoksa Scapy ARP keşfi denenir ve o da çalışmazsa real modda demo/fallback veri üretilmez.
 
-Her çalıştırma `MonitoringCycleRun` olarak kaydedilir. Dashboard ana sayfasındaki **Son Monitoring Cycle** paneli son çalışma zamanını, scan/honeypot/analiz özetini ve varsa hata özetini gösterir. Periyodik kullanım için Windows Task Scheduler veya Linux/macOS cron ile aynı `python manage.py run_monitoring_cycle --scan-limit 10` komutu zamanlanabilir.
+Her çalıştırma `MonitoringCycleRun` olarak kaydedilir. Dashboard ana sayfasındaki **Son Monitoring Cycle** paneli son çalışma zamanını, scan/honeypot/analiz özetini, ignored/parse error sayılarını ve varsa hata özetini gösterir. Dashboard sayfası 60 saniyede bir otomatik yenilenir ve üst bölümde son render zamanı görünür. Periyodik kullanım için Windows Task Scheduler veya Linux/macOS cron ile aynı `python manage.py run_monitoring_cycle --scan-limit 10` komutu zamanlanabilir.
 
 ## Runtime / Sistem Sağlığı
 

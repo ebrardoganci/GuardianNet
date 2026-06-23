@@ -196,3 +196,11 @@ class MonitoringCycleRun(models.Model):
 
     def __str__(self):
         return f"{self.started_at:%Y-%m-%d %H:%M} - {self.status}"
+
+    @property
+    def honeypot_ignored_lines(self):
+        honeypot = (self.raw_summary or {}).get("honeypot") or {}
+        try:
+            return int(honeypot.get("ignored", 0) or 0)
+        except (TypeError, ValueError):
+            return 0

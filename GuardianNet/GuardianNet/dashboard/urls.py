@@ -11,4 +11,5 @@ urlpatterns = [
     path("events/", views.security_events, name="events"),
     path("reports/", views.reports, name="reports"), path("honeypot/", views.honeypot, name="honeypot"),
     path("settings/", views.settings_view, name="settings"), path("scan/", views.scan_network_view, name="scan_network"),
+    path("monitoring-cycle/", views.run_monitoring_cycle_view, name="run_monitoring_cycle"),
 ]
