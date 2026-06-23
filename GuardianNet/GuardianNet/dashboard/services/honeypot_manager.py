@@ -22,8 +22,17 @@ def get_honeypot_status():
     path = get_log_path()
     enabled = get_bool("enable_honeypot_logs", settings.ENABLE_HONEYPOT_LOGS)
     available = enabled and path.is_file()
-    return {"mode": "opencanary" if available else "demo",
-            "label": "OpenCanary loglari aktif" if available else "OpenCanary bulunamadi / demo fallback",
+    if available:
+        mode = "opencanary"
+        label = "OpenCanary loglari aktif"
+    elif enabled:
+        mode = "unavailable"
+        label = "OpenCanary logu bulunamadi"
+    else:
+        mode = "disabled"
+        label = "Honeypot loglari kapali"
+    return {"mode": mode,
+            "label": label,
             "services": {"ssh": "izleniyor", "http": "izleniyor", "ftp": "izleniyor"},
             "available": available, "executable": shutil.which("opencanaryd") is not None, "log_path": str(path)}
 

@@ -1,4 +1,5 @@
 from dashboard.models import Alert, Device, SecurityEvent
+from dashboard.services.data_scope import is_real_mode, real_devices
 
 
 def detect_arp_anomalies(entries):
@@ -16,7 +17,11 @@ def detect_arp_anomalies(entries):
 
 
 def analyze_arp_observations(entries=None):
-    entries = entries or list(Device.objects.exclude(mac_address__isnull=True).values("ip_address", "mac_address"))
+    if entries is None:
+        device_qs = Device.objects.exclude(mac_address__isnull=True)
+        if is_real_mode():
+            device_qs = real_devices(device_qs)
+        entries = list(device_qs.values("ip_address", "mac_address"))
     anomalies = detect_arp_anomalies(entries)
     for item in anomalies:
         source_ip = item["ip_address"]

@@ -5,6 +5,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from dashboard.models import Alert, HoneypotEvent, SecurityEvent
+from dashboard.services.data_scope import is_real_mode, real_security_events
 
 
 def detect_port_scan(events, threshold=8):
@@ -22,7 +23,12 @@ def analyze_port_scan_logs(threshold=None, minutes=None):
     minutes = minutes or settings.DETECTION_WINDOW_MINUTES
     since = timezone.now() - timedelta(minutes=minutes)
     rows = list(HoneypotEvent.objects.filter(created_at__gte=since, is_mock=False).values("source_ip", "destination_port", "service"))
-    rows += list(SecurityEvent.objects.filter(created_at__gte=since).exclude(event_type="port_scan").exclude(title__startswith="[demo-").values("source_ip", "destination_port", "protocol"))
+    event_qs = SecurityEvent.objects.filter(created_at__gte=since).exclude(event_type="port_scan")
+    if is_real_mode():
+        event_qs = real_security_events(event_qs)
+    else:
+        event_qs = event_qs.exclude(title__startswith="[demo-")
+    rows += list(event_qs.values("source_ip", "destination_port", "protocol"))
     findings = detect_port_scan(rows, threshold)
     bucket = since.strftime("%Y%m%d%H%M")
     for finding in findings:

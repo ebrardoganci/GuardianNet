@@ -1,3 +1,4 @@
 Django>=5.2,<6.1
+python-dotenv>=1.0,<2
 psutil>=5.9,<8
 scapy>=2.5,<3

@@ -13,8 +13,13 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = BASE_DIR.parent.parent
+
+load_dotenv(PROJECT_ROOT / ".env")
 
 
 def env_bool(name, default=False):
@@ -132,8 +137,10 @@ LOGIN_REDIRECT_URL = "/dashboard/"
 LOGOUT_REDIRECT_URL = "/login/"
 
 # GuardianNet runtime configuration. Environment variables override these safe defaults.
-GUARDIANNET_MODE = os.getenv("GUARDIANNET_MODE", "real").strip().lower()
-LOCAL_SUBNET = os.getenv("LOCAL_SUBNET", "").strip()
+GUARDIANNET_MODE_ENV = os.getenv("GUARDIANNET_MODE")
+LOCAL_SUBNET_ENV = os.getenv("LOCAL_SUBNET")
+GUARDIANNET_MODE = (GUARDIANNET_MODE_ENV or "real").strip().lower()
+LOCAL_SUBNET = (LOCAL_SUBNET_ENV or "").strip()
 SCAN_INTERVAL_SECONDS = int(os.getenv("SCAN_INTERVAL_SECONDS", "300"))
 OPENCANARY_LOG_PATH = os.getenv("OPENCANARY_LOG_PATH", str(BASE_DIR.parent.parent / "logs" / "opencanary.log"))
 ENABLE_REAL_SCAN = env_bool("ENABLE_REAL_SCAN", True)

@@ -3,27 +3,32 @@ from datetime import timedelta
 from django.utils import timezone
 
 from dashboard.models import Alert, Device, HoneypotEvent, RiskSnapshot, SecurityEvent
-from dashboard.services.runtime_settings import get_value
-
-
-def _real_devices():
-    return Device.objects.exclude(ip_address__startswith="192.0.2.").exclude(ip_address__startswith="198.51.100.").exclude(ip_address__startswith="203.0.113.")
+from dashboard.services.data_scope import (
+    is_real_mode,
+    real_alerts,
+    real_devices,
+    real_honeypot_events,
+    real_security_events,
+)
 
 
 def calculate_risk(active_alerts=None, events=None):
-    real_mode = get_value("guardiannet_mode", "real") == "real"
+    real_mode = is_real_mode()
     active_alerts = active_alerts if active_alerts is not None else Alert.objects.exclude(status="resolved")
     events = events if events is not None else SecurityEvent.objects.all()
     if real_mode and hasattr(active_alerts, "exclude"):
-        active_alerts = active_alerts.exclude(title__startswith="[demo-")
+        active_alerts = real_alerts(active_alerts)
     if real_mode and hasattr(events, "exclude"):
-        events = events.exclude(title__startswith="[demo-")
+        events = real_security_events(events)
     since = timezone.now() - timedelta(hours=24)
     alert_rows = list(active_alerts)
     high_count = sum(item.severity in {"high", "critical"} for item in alert_rows)
-    device_qs = _real_devices() if real_mode else Device.objects.all()
+    device_qs = real_devices() if real_mode else Device.objects.all()
     unknown_devices = device_qs.filter(is_trusted=False).count()
-    honeypot_count = HoneypotEvent.objects.filter(created_at__gte=since, is_mock=False).count()
+    honeypot_qs = HoneypotEvent.objects.filter(created_at__gte=since)
+    if real_mode:
+        honeypot_qs = real_honeypot_events(honeypot_qs)
+    honeypot_count = honeypot_qs.count()
     event_types = set(events.filter(created_at__gte=since).values_list("event_type", flat=True)) if hasattr(events, "filter") else {item.event_type for item in events}
     risk_score = min(100, len(alert_rows) * 3 + high_count * 10 + min(unknown_devices, 10) * 2
                      + min(honeypot_count, 20) + (12 if "port_scan" in event_types else 0)

@@ -19,7 +19,7 @@
   </section>
   <section class="panel">
     <h2>Sistem Durumu</h2>
-    <p>Algılanan local subnet: <strong>{{ detected_subnet }}</strong></p>
+    <p>Kullanılan subnet: <strong>{{ used_subnet }}</strong></p>
     <p>Gerçek tarama: <strong>{{ enable_real_scan|yesno:'Aktif,Kapalı' }}</strong></p>
     <p>Honeypot: <strong>{{ honeypot_status.label }}</strong></p>
     <p>Log yolu: <strong>{{ honeypot_status.log_path }}</strong></p>

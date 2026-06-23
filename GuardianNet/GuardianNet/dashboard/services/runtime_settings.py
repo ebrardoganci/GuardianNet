@@ -4,7 +4,12 @@ from dashboard.models import SystemSetting
 
 
 def get_value(key, default=None):
-    row = SystemSetting.objects.filter(key=key.lower()).first()
+    normalized = key.lower()
+    if normalized == "guardiannet_mode" and getattr(settings, "GUARDIANNET_MODE_ENV", None):
+        return settings.GUARDIANNET_MODE
+    if normalized == "local_subnet" and getattr(settings, "LOCAL_SUBNET_ENV", None):
+        return settings.LOCAL_SUBNET
+    row = SystemSetting.objects.filter(key=normalized).first()
     return row.value if row else getattr(settings, key.upper(), default)
 
 
