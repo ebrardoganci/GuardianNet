@@ -9,7 +9,7 @@ from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from .models import Alert, Device, HoneypotEvent, RiskSnapshot, SecurityEvent
+from .models import Alert, Device, HoneypotEvent, MonitoringCycleRun, RiskSnapshot, SecurityEvent
 from .services.arp_monitor import detect_arp_anomalies
 from .services.bruteforce_detector import detect_bruteforce
 from .services.honeypot_manager import ingest_honeypot_logs
@@ -86,3 +86,9 @@ class DashboardMVPTests(TestCase):
         self.assertEqual(Device.objects.count(), 0)
         self.assertEqual(HoneypotEvent.objects.count(), 0)
         self.assertEqual(RiskSnapshot.objects.count(), 1)
+        self.assertEqual(MonitoringCycleRun.objects.count(), 1)
+        run = MonitoringCycleRun.objects.first()
+        self.assertEqual(run.status, "completed")
+        self.assertEqual(run.scan_status, "skipped")
+        self.assertEqual(run.honeypot_status, "skipped")
+        self.assertEqual(run.analysis_status, "completed")

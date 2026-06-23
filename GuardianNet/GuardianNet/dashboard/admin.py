@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Alert, Device, HoneypotEvent, NetworkScan, RiskSnapshot, SecurityEvent, SystemSetting
+from .models import Alert, Device, HoneypotEvent, MonitoringCycleRun, NetworkScan, RiskSnapshot, SecurityEvent, SystemSetting
 
 
 @admin.register(Device)
@@ -49,3 +49,10 @@ class RiskSnapshotAdmin(admin.ModelAdmin):
     list_display = ("risk_level", "risk_score", "security_score", "active_alerts", "recorded_at")
     list_filter = ("risk_level", "recorded_at")
     search_fields = ("risk_level",)
+
+
+@admin.register(MonitoringCycleRun)
+class MonitoringCycleRunAdmin(admin.ModelAdmin):
+    list_display = ("started_at", "completed_at", "status", "scan_status", "honeypot_status", "analysis_status", "risk_score")
+    list_filter = ("status", "scan_status", "honeypot_status", "analysis_status", "started_at")
+    search_fields = ("error_summary",)

@@ -8,7 +8,7 @@ from django.db.models.functions import TruncDate
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
-from .models import Alert, Device, HoneypotEvent, NetworkScan, RiskSnapshot, SecurityEvent, SystemSetting
+from .models import Alert, Device, HoneypotEvent, MonitoringCycleRun, NetworkScan, RiskSnapshot, SecurityEvent, SystemSetting
 from .services.honeypot_manager import get_honeypot_status
 from .services.network_scanner import scan_network
 from .services.network_scanner import resolve_target_subnet
@@ -68,6 +68,7 @@ def index(request):
         "active_alerts": active_alerts_count,
         "recent_events": events_qs[:6], "recent_alerts": alerts_qs[:6],
         "honeypot_status": get_honeypot_status(),
+        "latest_monitoring_cycle": MonitoringCycleRun.objects.first(),
         "operation_mode": mode,
         "device_chart": {"labels": ["Online", "Offline", "Bilinmiyor"], "values": [online, offline, unknown]},
         "severity_chart": {"labels": ["Dusuk", "Orta", "Yuksek", "Kritik"], "values": [alerts_qs.filter(severity=value).count() for value in ["low", "medium", "high", "critical"]]},

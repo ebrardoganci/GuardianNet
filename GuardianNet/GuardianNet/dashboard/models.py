@@ -156,3 +156,42 @@ class RiskSnapshot(models.Model):
 
     def __str__(self):
         return f"{self.recorded_at:%Y-%m-%d %H:%M} - {self.risk_score}"
+
+
+class MonitoringCycleRun(models.Model):
+    STATUS_CHOICES = [
+        ("completed", "Tamamlandi"),
+        ("partial", "Kismi"),
+        ("failed", "Basarisiz"),
+    ]
+    STEP_STATUS_CHOICES = [
+        ("pending", "Bekliyor"),
+        ("completed", "Tamamlandi"),
+        ("skipped", "Atlandi"),
+        ("failed", "Basarisiz"),
+    ]
+
+    started_at = models.DateTimeField("Baslangic", auto_now_add=True)
+    completed_at = models.DateTimeField("Bitis", blank=True, null=True)
+    status = models.CharField("Durum", max_length=20, choices=STATUS_CHOICES, default="failed")
+    scan_status = models.CharField("Scan durumu", max_length=20, choices=STEP_STATUS_CHOICES, default="pending")
+    scan_found_devices = models.PositiveIntegerField("Bulunan cihaz", default=0)
+    scan_new_devices = models.PositiveIntegerField("Yeni cihaz", default=0)
+    honeypot_status = models.CharField("Honeypot durumu", max_length=20, choices=STEP_STATUS_CHOICES, default="pending")
+    honeypot_read_lines = models.PositiveIntegerField("Okunan log satiri", default=0)
+    honeypot_created_events = models.PositiveIntegerField("Eklenen honeypot olayi", default=0)
+    honeypot_duplicates = models.PositiveIntegerField("Duplicate honeypot olayi", default=0)
+    honeypot_parse_errors = models.PositiveIntegerField("Honeypot parse hatasi", default=0)
+    analysis_status = models.CharField("Analiz durumu", max_length=20, choices=STEP_STATUS_CHOICES, default="pending")
+    arp_alerts = models.PositiveIntegerField("ARP bulgusu", default=0)
+    port_alerts = models.PositiveIntegerField("Port bulgusu", default=0)
+    ssh_alerts = models.PositiveIntegerField("SSH bulgusu", default=0)
+    risk_score = models.PositiveSmallIntegerField("Risk skoru", default=0, validators=[MaxValueValidator(100)])
+    error_summary = models.TextField("Hata ozeti", blank=True)
+    raw_summary = models.JSONField("Ham ozet", default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+
+    def __str__(self):
+        return f"{self.started_at:%Y-%m-%d %H:%M} - {self.status}"
