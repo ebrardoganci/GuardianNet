@@ -23,6 +23,7 @@ from .services.data_scope import (
     real_security_events,
 )
 from .services.risk_engine import calculate_risk
+from .services.runtime_health import get_runtime_health
 from .services.runtime_settings import get_bool, get_value
 
 
@@ -285,6 +286,7 @@ def settings_view(request):
         "opencanary_log_path": get_value("opencanary_log_path", ""),
         "honeypot_status": get_honeypot_status(), "last_scan": last_scan_qs.first(),
         "last_ingest": last_ingest.value if last_ingest else "Henuz calismadi",
+        "runtime_health_checks": get_runtime_health(),
     })
 
 

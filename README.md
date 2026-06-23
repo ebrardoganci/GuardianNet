@@ -104,6 +104,18 @@ python manage.py run_monitoring_cycle --skip-honeypot
 
 Her çalıştırma `MonitoringCycleRun` olarak kaydedilir. Dashboard ana sayfasındaki **Son Monitoring Cycle** paneli son çalışma zamanını, scan/honeypot/analiz özetini ve varsa hata özetini gösterir. Periyodik kullanım için Windows Task Scheduler veya Linux/macOS cron ile aynı `python manage.py run_monitoring_cycle --scan-limit 10` komutu zamanlanabilir.
 
+## Runtime / Sistem Sağlığı
+
+Gerçek modun hazır olup olmadığını tek yerden görmek için:
+
+```powershell
+python manage.py check_runtime_health
+```
+
+Komut `GUARDIANNET_MODE`, `LOCAL_SUBNET`, kullanılan subnet, real scan ve honeypot ayarları, Nmap/Npcap/Scapy erişilebilirliği, OpenCanary log yolu, logs klasörü ve son `NetworkScan` / `MonitoringCycleRun` / `RiskSnapshot` kayıtlarını OK/WARNING/ERROR olarak raporlar. Aynı kontroller web arayüzünde **Ayarlar > Sistem Sağlığı** tablosunda görünür.
+
+Nmap bulunamazsa Windows'ta PATH ve Npcap kurulumunu kontrol edin. OpenCanary log dosyası yoksa bu tek başına hata değildir; henüz log üretilmemiş olabilir veya `OPENCANARY_LOG_PATH` farklı bir dosyayı gösteriyor olabilir.
+
 ## Cihaz Envanteri
 
 Cihazlar sayfası real modda yalnızca kullanılan subnet içindeki kayıtları ana listede gösterir. Eski veya farklı subnet kayıtları silinmez; ana dashboard sayıları ve cihaz listesi gerçek çalışma kapsamına göre filtrelenir. Bir cihaz son gerçek taramada görülürse `online`, daha önce görülmüş ama son taramada görülmemişse `offline` kabul edilir. Offline'a çekilen cihazın `last_seen` zamanı korunur; böylece cihazın en son gerçekten ne zaman görüldüğü kaybolmaz.
@@ -126,6 +138,7 @@ python manage.py migrate
 python manage.py run_network_scan
 python manage.py ingest_honeypot_logs
 python manage.py analyze_security
+python manage.py check_runtime_health
 python manage.py run_monitoring_cycle --scan-limit 10
 ```
 

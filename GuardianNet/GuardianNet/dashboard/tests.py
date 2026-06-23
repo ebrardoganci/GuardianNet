@@ -15,6 +15,7 @@ from .services.bruteforce_detector import detect_bruteforce
 from .services.honeypot_manager import ingest_honeypot_logs
 from .services.network_scanner import resolve_target_subnet, scan_network
 from .services.port_scan_detector import detect_port_scan
+from .services.runtime_health import get_runtime_health
 
 
 class DashboardMVPTests(TestCase):
@@ -146,3 +147,24 @@ class DashboardMVPTests(TestCase):
         alerts_response = self.client.get(reverse("dashboard:alerts"))
         self.assertContains(alerts_response, "active")
         self.assertNotContains(alerts_response, "scope-excluded-alert")
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_runtime_health_returns_structured_checks_without_creating_fake_data(self):
+        before = (Device.objects.count(), Alert.objects.count(), HoneypotEvent.objects.count(), SecurityEvent.objects.count())
+        checks = get_runtime_health()
+        after = (Device.objects.count(), Alert.objects.count(), HoneypotEvent.objects.count(), SecurityEvent.objects.count())
+        self.assertEqual(before, after)
+        self.assertTrue(checks)
+        required_keys = {"key", "label", "status", "value", "message", "hint"}
+        for item in checks:
+            self.assertTrue(required_keys.issubset(item.keys()))
+            self.assertIn(item["status"], {"ok", "warning", "error", "unknown"})
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_check_runtime_health_command_runs_without_creating_fake_data(self):
+        before = (Device.objects.count(), Alert.objects.count(), HoneypotEvent.objects.count(), SecurityEvent.objects.count())
+        output = StringIO()
+        call_command("check_runtime_health", stdout=output)
+        after = (Device.objects.count(), Alert.objects.count(), HoneypotEvent.objects.count(), SecurityEvent.objects.count())
+        self.assertEqual(before, after)
+        self.assertIn("Ozet:", output.getvalue())

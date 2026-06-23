@@ -27,4 +27,27 @@
     <p>Son honeypot ingest: <strong>{{ last_ingest }}</strong></p>
   </section>
 </div>
+<section class="panel">
+  <h2>Sistem Sağlığı</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Durum</th><th>Kontrol</th><th>Değer</th><th>Mesaj</th><th>Öneri</th></tr>
+      </thead>
+      <tbody>
+        {% for item in runtime_health_checks %}
+          <tr>
+            <td><span class="badge severity-{% if item.status == 'error' %}high{% elif item.status == 'warning' %}medium{% elif item.status == 'ok' %}low{% else %}info{% endif %}">{{ item.status|upper }}</span></td>
+            <td>{{ item.label }}</td>
+            <td>{{ item.value|default:'-' }}</td>
+            <td>{{ item.message }}</td>
+            <td>{{ item.hint|default:'-' }}</td>
+          </tr>
+        {% empty %}
+          <tr><td colspan="5">Sistem sağlığı kontrolü yok.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endblock %}
