@@ -150,6 +150,74 @@ Uyarılar `active`, `acknowledged` veya `resolved` durumunda tutulur. `active` h
 
 Uyarılar sayfasında filtreleme yapılabilir ve her uyarı POST aksiyonlarıyla “İncelendi”, “Çözüldü” veya “Aktif yap” durumuna alınabilir. Cihaz detay sayfasındaki ilişkili uyarılar için de aynı aksiyonlar kullanılabilir.
 
+## Running a monitoring cycle manually
+
+Run the monitoring cycle from the Django `manage.py` directory:
+
+```powershell
+cd GuardianNet\GuardianNet
+python manage.py run_monitoring_cycle --scan-limit 10
+```
+
+The command runs the same defensive workflow as the dashboard button: network scan, honeypot ingest, security analysis, and risk update. `LOCAL_SUBNET` is read from `.env` or saved runtime settings; do not hardcode a subnet in scripts. In real mode GuardianNet does not create demo or fallback data when Nmap, Scapy, OpenCanary, or the log file is unavailable.
+
+## Running from the dashboard
+
+Use the **Monitoring Cycle Calistir** button on the dashboard to run one cycle from the web UI. The optional scan limit input limits the number of scan targets; it does not set a fixed device count. After completion, the dashboard shows scan found/new counts, honeypot read/created/duplicate/ignored/parse counts, started and finished times, and the latest risk score.
+
+## Windows Task Scheduler setup
+
+The repository includes `scripts\run_guardian_cycle.bat` for scheduled Windows runs. The script finds the repo root from its own location, changes into `GuardianNet\GuardianNet`, runs:
+
+```powershell
+python manage.py run_monitoring_cycle --scan-limit 10
+```
+
+and appends output to `logs\monitoring_cycle_task.log`. If you move the script or prefer a hardcoded path, edit the path variables for your own local repo location first.
+
+Task Scheduler setup:
+
+1. Open Task Scheduler.
+2. Choose **Create Basic Task**.
+3. Choose a trigger such as every 15, 30, or 60 minutes, or daily.
+4. Choose **Start a program**.
+5. Set **Program/script** to the full path of `scripts\run_guardian_cycle.bat`.
+6. Set **Start in** to the repo root or the `scripts` folder.
+7. Use **Run** manually once to test the task.
+
+## Honeypot demo test
+
+OpenCanary runs with Docker Compose and writes JSON lines to `logs\opencanary.log`. For a safe local demo, start Docker Desktop and OpenCanary, then test the local SSH honeypot port on your own machine:
+
+```powershell
+ssh fakeadmin@127.0.0.1 -p 2222
+```
+
+On Windows, this port check is also safe:
+
+```powershell
+Test-NetConnection 127.0.0.1 -Port 2222
+```
+
+Then ingest and analyze the event:
+
+```powershell
+cd GuardianNet\GuardianNet
+python manage.py run_monitoring_cycle --scan-limit 10
+```
+
+Check the dashboard for the honeypot event and the updated risk score.
+
+## Safety notes
+
+- `.env` is not committed.
+- `logs/opencanary.log` is not committed.
+- `logs/monitoring_cycle_task.log` is not committed.
+- `LOCAL_SUBNET` comes from `.env` or runtime settings.
+- OpenCanary runs with Docker.
+- Real mode does not generate demo or fallback data.
+- Do not scan public IPs, school networks, or any system where you do not have explicit permission.
+
 ## Test
 
 ```powershell

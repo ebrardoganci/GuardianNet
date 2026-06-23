@@ -42,11 +42,7 @@
   <article>
     <span>Son Taramada Bulunan</span
     ><strong>{{ last_scan_found_devices|default:'-' }}</strong
-    ><small
-      >{% if latest_monitoring_cycle %}Cycle {{
-      latest_monitoring_cycle.started_at|date:'d.m H:i' }}{% else %}Henüz cycle
-      yok{% endif %}</small
-    >
+    ><small>{% if latest_monitoring_cycle %}Cycle {{ latest_monitoring_cycle.started_at|date:"d.m H:i" }}{% else %}Henüz cycle yok{% endif %}</small>
   </article>
   <article>
     <span>Aktif Uyarı</span><strong>{{ active_alerts }}</strong>
@@ -68,45 +64,29 @@
   {% if latest_monitoring_cycle %}
   <div class="stats">
     <article>
-      <span>Çalışma Zamanı</span>
-      <strong
-        >{{
-        latest_monitoring_cycle.completed_at|default:latest_monitoring_cycle.started_at|date:'d.m.Y
-        H:i' }}</strong
-      >
+      <span>Started time</span>
+      <strong>{{ latest_monitoring_cycle.started_at|date:"d.m.Y H:i" }}</strong>
       <small>{{ latest_monitoring_cycle.get_status_display }}</small>
     </article>
     <article>
-      <span>Scan</span>
-      <strong
-        >{{ latest_monitoring_cycle.scan_found_devices }} / {{
-        latest_monitoring_cycle.scan_new_devices }}</strong
-      >
-      <small
-        >{{ latest_monitoring_cycle.get_scan_status_display }} · bulunan /
-        yeni</small
-      >
+      <span>Finished time</span>
+      <strong>{% if latest_monitoring_cycle.completed_at %}{{ latest_monitoring_cycle.completed_at|date:"d.m.Y H:i" }}{% else %}-{% endif %}</strong>
+      <small>Cycle status</small>
     </article>
     <article>
-      <span>Honeypot</span>
-      <strong
-        >{{ latest_monitoring_cycle.honeypot_read_lines }} / {{
-        latest_monitoring_cycle.honeypot_created_events }}</strong
-      >
-      <small
-        >{{ latest_monitoring_cycle.honeypot_duplicates }} duplicate · {{
-        latest_monitoring_cycle.honeypot_ignored_lines }} ignored · {{
-        latest_monitoring_cycle.honeypot_parse_errors }} parse</small
-      >
+      <span>Scan found/new</span>
+      <strong>{{ latest_monitoring_cycle.scan_found_devices }} / {{ latest_monitoring_cycle.scan_new_devices }}</strong>
+      <small>{{ latest_monitoring_cycle.get_scan_status_display }}</small>
     </article>
     <article>
-      <span>Analiz</span>
+      <span>Honeypot read/created</span>
+      <strong>{{ latest_monitoring_cycle.honeypot_read_lines }} / {{ latest_monitoring_cycle.honeypot_created_events }}</strong>
+      <small>{{ latest_monitoring_cycle.honeypot_duplicates }} duplicate · {{ latest_monitoring_cycle.honeypot_ignored_lines }} ignored · {{ latest_monitoring_cycle.honeypot_parse_errors }} parse</small>
+    </article>
+    <article>
+      <span>Risk score</span>
       <strong>{{ latest_monitoring_cycle.risk_score }}</strong>
-      <small
-        >ARP {{ latest_monitoring_cycle.arp_alerts }} · Port {{
-        latest_monitoring_cycle.port_alerts }} · SSH {{
-        latest_monitoring_cycle.ssh_alerts }}</small
-      >
+      <small>ARP {{ latest_monitoring_cycle.arp_alerts }} · Port {{ latest_monitoring_cycle.port_alerts }} · SSH {{ latest_monitoring_cycle.ssh_alerts }}</small>
     </article>
   </div>
   {% if latest_monitoring_cycle.error_summary %}
@@ -126,8 +106,8 @@
     <div class="chart-box"><canvas id="severity-chart"></canvas></div>
   </section>
 </div>
-{{ device_chart|json_script:'device-chart-data' }}{{
-severity_chart|json_script:'severity-chart-data' }}
+{{ device_chart|json_script:"device-chart-data" }}
+{{ severity_chart|json_script:"severity-chart-data" }}
 
 <div class="grid-2">
   <section class="panel">

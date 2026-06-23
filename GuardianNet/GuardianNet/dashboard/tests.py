@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -8,6 +9,7 @@ from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from .models import Alert, Device, HoneypotEvent, MonitoringCycleRun, RiskSnapshot, SecurityEvent
 from .services.arp_monitor import detect_arp_anomalies
@@ -163,6 +165,40 @@ class DashboardMVPTests(TestCase):
         self.assertEqual(MonitoringCycleRun.objects.count(), 0)
         self.assertEqual(Device.objects.count(), 0)
         self.assertEqual(HoneypotEvent.objects.count(), 0)
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_dashboard_renders_latest_monitoring_cycle_without_raw_template_tags(self):
+        self.client.force_login(self.user)
+        started_at = timezone.make_aware(datetime(2026, 6, 24, 1, 27))
+        completed_at = timezone.make_aware(datetime(2026, 6, 24, 1, 28))
+        run = MonitoringCycleRun.objects.create(
+            completed_at=completed_at,
+            status="completed",
+            scan_status="completed",
+            scan_found_devices=1,
+            scan_new_devices=0,
+            honeypot_status="completed",
+            honeypot_read_lines=9,
+            honeypot_created_events=0,
+            honeypot_duplicates=1,
+            honeypot_parse_errors=0,
+            analysis_status="completed",
+            risk_score=11,
+            raw_summary={"honeypot": {"ignored": 8}},
+        )
+        MonitoringCycleRun.objects.filter(pk=run.pk).update(started_at=started_at)
+
+        response = self.client.get(reverse("dashboard:index"))
+
+        self.assertContains(response, "Cycle 24.06 01:27")
+        self.assertContains(response, "Scan found/new")
+        self.assertContains(response, "Honeypot read/created")
+        self.assertContains(response, "1 duplicate")
+        self.assertContains(response, "8 ignored")
+        self.assertContains(response, "Risk score")
+        content = response.content.decode()
+        self.assertNotIn("{{", content)
+        self.assertNotIn("latest_monitoring_cycle.started_at", content)
 
     @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
     @patch("dashboard.services.monitoring_cycle.run_security_analysis")
