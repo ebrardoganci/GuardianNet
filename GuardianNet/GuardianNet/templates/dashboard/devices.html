@@ -1,1 +1,23 @@
-{% extends 'base.html' %}{% block title %}Cihazlar | GuardianNet{% endblock %}{% block content %}<h1>Cihazlar</h1><p>Yetkili veri kaynaklarından gözlemlenen ağ varlıkları.</p><section class="panel"><div class="table-wrap"><table><thead><tr><th>IP</th><th>MAC</th><th>Hostname</th><th>Vendor</th><th>Durum</th><th>Güven</th><th>İlk Görülme</th><th>Son Görülme</th></tr></thead><tbody>{% for item in devices %}<tr><td>{{ item.ip_address }}</td><td>{{ item.mac_address|default:'-' }}</td><td>{{ item.hostname|default:'-' }}</td><td>{{ item.vendor|default:'-' }}</td><td><span class="badge status-{{ item.status }}">{{ item.get_status_display }}</span></td><td>{% if item.is_trusted %}Güvenilir{% else %}Güvenilmeyen{% endif %}</td><td>{{ item.first_seen|date:'d.m.Y H:i' }}</td><td>{{ item.last_seen|date:'d.m.Y H:i' }}</td></tr>{% empty %}<tr><td colspan="8">Cihaz kaydı yok.</td></tr>{% endfor %}</tbody></table></div></section>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}Cihazlar | GuardianNet{% endblock %}
+{% block content %}
+<h1>Cihazlar</h1>
+<p>Yetkili veri kaynaklarından gözlemlenen ağ varlıkları.</p>
+<section class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Filtre</th><th>Durum</th></tr></thead>
+      <tbody><tr><td>{% for key, label in device_filters.items %}<a href="?filter={{ key }}"{% if active_filter == key %} class="badge"{% endif %}>{{ label }}</a>{% if not forloop.last %} · {% endif %}{% endfor %}</td><td>{% if latest_scan %}Son gerçek tarama: {{ latest_scan.started_at|date:'d.m.Y H:i' }}{% else %}Henüz gerçek tarama yok{% endif %}</td></tr></tbody>
+    </table>
+  </div>
+  {% if out_of_scope_count %}<p>Kapsam dışı / geçmiş cihaz kayıtları: {{ out_of_scope_count }}. Ana real listeye dahil edilmez.</p>{% endif %}
+</section>
+<section class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>IP</th><th>MAC</th><th>Hostname</th><th>Vendor</th><th>Durum</th><th>İlk Görülme</th><th>Son Görülme</th><th>Son Taramada</th><th>Aktif Uyarı</th></tr></thead>
+      <tbody>{% for row in device_rows %}<tr><td><a href="{% url 'dashboard:device_detail' row.device.pk %}">{{ row.device.ip_address }}</a></td><td>{{ row.device.mac_address|default:'-' }}</td><td>{{ row.device.hostname|default:'-' }}</td><td>{{ row.device.vendor|default:'-' }}</td><td><span class="badge status-{{ row.device.status }}">{{ row.device.get_status_display }}</span></td><td>{{ row.device.first_seen|date:'d.m.Y H:i' }}</td><td>{{ row.device.last_seen|date:'d.m.Y H:i' }}</td><td>{% if row.seen_in_last_scan %}Evet{% else %}Hayır{% endif %}</td><td>{{ row.active_alert_count }}</td></tr>{% empty %}<tr><td colspan="9">Cihaz kaydı yok.</td></tr>{% endfor %}</tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

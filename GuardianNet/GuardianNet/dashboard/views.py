@@ -3,9 +3,10 @@ from datetime import timedelta
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.conf import settings
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.db.models.functions import TruncDate
-from django.shortcuts import redirect, render
+from django.http import Http404
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
 from .models import Alert, Device, HoneypotEvent, MonitoringCycleRun, NetworkScan, RiskSnapshot, SecurityEvent, SystemSetting
@@ -22,6 +23,15 @@ from .services.data_scope import (
 )
 from .services.risk_engine import calculate_risk
 from .services.runtime_settings import get_bool, get_value
+
+
+DEVICE_FILTERS = {
+    "all": "Tumu",
+    "online": "Online",
+    "offline": "Offline",
+    "new": "Yeni cihazlar",
+    "alerts": "Uyarisi olan cihazlar",
+}
 
 
 def _risk_context():
@@ -48,6 +58,39 @@ def _data_sources():
     return devices_qs, alerts_qs, events_qs, honeypot_qs
 
 
+def _latest_real_scan():
+    return NetworkScan.objects.filter(is_mock=False, status="completed").order_by("-started_at").first()
+
+
+def _inventory_rows(devices_qs):
+    latest_scan = _latest_real_scan()
+    active_alerts_qs = real_alerts(Alert.objects.filter(status="active")) if is_real_mode() else Alert.objects.filter(status="active")
+    new_alerts_qs = active_alerts_qs.filter(alert_type="new_device")
+    rows = []
+    for device in devices_qs:
+        device_alerts = active_alerts_qs.filter(Q(device=device) | Q(source_ip=device.ip_address)).distinct()
+        has_new_alert = new_alerts_qs.filter(Q(device=device) | Q(source_ip=device.ip_address)).exists()
+        rows.append({
+            "device": device,
+            "seen_in_last_scan": device.status == "online" and latest_scan is not None,
+            "active_alert_count": device_alerts.count(),
+            "is_new": has_new_alert or (latest_scan is not None and device.first_seen >= latest_scan.started_at),
+        })
+    return rows
+
+
+def _apply_device_filter(rows, filter_key):
+    if filter_key == "online":
+        return [row for row in rows if row["device"].status == "online"]
+    if filter_key == "offline":
+        return [row for row in rows if row["device"].status == "offline"]
+    if filter_key == "new":
+        return [row for row in rows if row["is_new"]]
+    if filter_key == "alerts":
+        return [row for row in rows if row["active_alert_count"] > 0]
+    return rows
+
+
 @login_required
 def index(request):
     mode = get_value("guardiannet_mode", "real")
@@ -57,6 +100,8 @@ def index(request):
     online = devices_qs.filter(status="online").count()
     offline = devices_qs.filter(status="offline").count()
     unknown = devices_qs.filter(status="unknown").count()
+    latest_scan = _latest_real_scan()
+    latest_cycle = MonitoringCycleRun.objects.first()
     active_alerts_count = (
         real_alerts(Alert.objects.filter(status="active")).count()
         if is_real_mode()
@@ -65,10 +110,11 @@ def index(request):
     context = {
         "total_devices": devices_qs.count(), "active_devices": online,
         "online_devices": online, "offline_devices": offline,
+        "last_scan_found_devices": latest_scan.devices_found if latest_scan else None,
         "active_alerts": active_alerts_count,
         "recent_events": events_qs[:6], "recent_alerts": alerts_qs[:6],
         "honeypot_status": get_honeypot_status(),
-        "latest_monitoring_cycle": MonitoringCycleRun.objects.first(),
+        "latest_monitoring_cycle": latest_cycle,
         "operation_mode": mode,
         "device_chart": {"labels": ["Online", "Offline", "Bilinmiyor"], "values": [online, offline, unknown]},
         "severity_chart": {"labels": ["Dusuk", "Orta", "Yuksek", "Kritik"], "values": [alerts_qs.filter(severity=value).count() for value in ["low", "medium", "high", "critical"]]},
@@ -79,7 +125,38 @@ def index(request):
 
 @login_required
 def devices(request):
-    return render(request, "dashboard/devices.html", {"devices": _data_sources()[0]})
+    filter_key = request.GET.get("filter", "all")
+    if filter_key not in DEVICE_FILTERS:
+        filter_key = "all"
+    devices_qs = _data_sources()[0]
+    rows = _inventory_rows(devices_qs)
+    filtered_rows = _apply_device_filter(rows, filter_key)
+    out_of_scope_count = 0
+    if is_real_mode():
+        out_of_scope_count = Device.objects.exclude(pk__in=devices_qs.values("pk")).count()
+    return render(request, "dashboard/devices.html", {
+        "device_rows": filtered_rows,
+        "device_filters": DEVICE_FILTERS,
+        "active_filter": filter_key,
+        "out_of_scope_count": out_of_scope_count,
+        "latest_scan": _latest_real_scan(),
+    })
+
+
+@login_required
+def device_detail(request, pk):
+    device = get_object_or_404(Device, pk=pk)
+    if is_real_mode() and not real_devices(Device.objects.filter(pk=device.pk)).exists():
+        raise Http404("Cihaz kullanilan subnet kapsaminda degil.")
+    alerts_qs = real_alerts(Alert.objects.filter(Q(device=device) | Q(source_ip=device.ip_address))) if is_real_mode() else Alert.objects.filter(Q(device=device) | Q(source_ip=device.ip_address))
+    events_qs = real_security_events(SecurityEvent.objects.filter(Q(source_ip=device.ip_address) | Q(destination_ip=device.ip_address))) if is_real_mode() else SecurityEvent.objects.filter(Q(source_ip=device.ip_address) | Q(destination_ip=device.ip_address))
+    row = _inventory_rows(Device.objects.filter(pk=device.pk))[0]
+    return render(request, "dashboard/device_detail.html", {
+        "device": device,
+        "inventory": row,
+        "alerts": alerts_qs,
+        "events": events_qs,
+    })
 
 
 @login_required

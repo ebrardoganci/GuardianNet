@@ -54,6 +54,24 @@ class DashboardMVPTests(TestCase):
         self.assertTrue(result["success"])
         self.assertTrue(Device.objects.filter(ip_address="192.168.50.10", status="online").exists())
 
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_device_inventory_uses_real_scope_and_shows_offline(self):
+        self.client.force_login(self.user)
+        Device.objects.create(ip_address="192.168.50.10", mac_address="00:11:22:33:44:55", status="offline")
+        Device.objects.create(ip_address="192.168.60.10", mac_address="00:11:22:33:44:66", status="online")
+        response = self.client.get(reverse("dashboard:devices"))
+        self.assertContains(response, "192.168.50.10")
+        self.assertContains(response, "Offline")
+        self.assertNotContains(response, "192.168.60.10")
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24", ENABLE_REAL_SCAN=True)
+    @patch("dashboard.services.network_scanner._scan_with_nmap")
+    def test_real_scan_does_not_duplicate_new_device_alerts(self, nmap_scan):
+        nmap_scan.return_value = ([{"ip_address": "192.168.50.20", "mac_address": "00:11:22:33:44:77", "hostname": None, "vendor": "Test"}], "nmap-ping")
+        self.assertTrue(scan_network()["success"])
+        self.assertTrue(scan_network()["success"])
+        self.assertEqual(Alert.objects.filter(alert_type="new_device", source_ip="192.168.50.20", status="active").count(), 1)
+
     @override_settings(ENABLE_HONEYPOT_LOGS=True)
     def test_honeypot_ingest_is_idempotent(self):
         with TemporaryDirectory() as directory:
