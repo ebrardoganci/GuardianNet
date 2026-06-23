@@ -14,7 +14,7 @@ from dashboard.services.data_scope import (
 
 def calculate_risk(active_alerts=None, events=None):
     real_mode = is_real_mode()
-    active_alerts = active_alerts if active_alerts is not None else Alert.objects.exclude(status="resolved")
+    active_alerts = active_alerts if active_alerts is not None else Alert.objects.filter(status="active")
     events = events if events is not None else SecurityEvent.objects.all()
     if real_mode and hasattr(active_alerts, "exclude"):
         active_alerts = real_alerts(active_alerts)

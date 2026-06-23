@@ -33,7 +33,7 @@ class Alert(models.Model):
         ("arp_spoof", "ARP Anomali Tespiti"), ("brute_force", "Kaba Kuvvet Tespiti"),
         ("suspicious_traffic", "Supheli Trafik"), ("honeypot", "Honeypot"), ("system", "Sistem"),
     ]
-    STATUS_CHOICES = [("active", "Aktif"), ("investigating", "Inceleniyor"), ("resolved", "Cozuldu")]
+    STATUS_CHOICES = [("active", "Aktif"), ("acknowledged", "Incelendi"), ("resolved", "Cozuldu")]
 
     device = models.ForeignKey(Device, on_delete=models.SET_NULL, blank=True, null=True, related_name="alerts")
     alert_type = models.CharField("Uyari tipi", max_length=50, choices=ALERT_TYPE_CHOICES)
@@ -45,6 +45,7 @@ class Alert(models.Model):
     source_mac = models.CharField("Kaynak MAC", max_length=50, blank=True)
     is_resolved = models.BooleanField("Cozuldu", default=False)
     created_at = models.DateTimeField("Olusturulma tarihi", auto_now_add=True)
+    updated_at = models.DateTimeField("Guncellenme tarihi", auto_now=True)
 
     class Meta:
         ordering = ["-created_at"]

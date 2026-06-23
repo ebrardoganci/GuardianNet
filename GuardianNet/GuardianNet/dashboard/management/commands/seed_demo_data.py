@@ -18,7 +18,7 @@ class Command(BaseCommand):
 
         alert_rows = [
             ("demo-new-device", "new_device", "medium", "Yeni demo cihaz", "192.0.2.21", "active"),
-            ("demo-port-detection", "port_scan", "high", "Port tarama davranisi tespit edildi", "192.0.2.45", "investigating"),
+            ("demo-port-detection", "port_scan", "high", "Port tarama davranisi tespit edildi", "192.0.2.45", "acknowledged"),
             ("demo-honeypot", "honeypot", "critical", "Honeypot etkilesimi", "198.51.100.23", "active"),
         ]
         for key, alert_type, severity, title, source_ip, status in alert_rows:

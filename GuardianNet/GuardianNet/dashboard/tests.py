@@ -110,3 +110,39 @@ class DashboardMVPTests(TestCase):
         self.assertEqual(run.scan_status, "skipped")
         self.assertEqual(run.honeypot_status, "skipped")
         self.assertEqual(run.analysis_status, "completed")
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_alert_status_update_requires_post_and_updates_status(self):
+        self.client.force_login(self.user)
+        device = Device.objects.create(ip_address="192.168.50.30", status="online")
+        alert = Alert.objects.create(
+            device=device, alert_type="new_device", severity="medium", status="active",
+            title="Yeni cihaz tespit edildi: 192.168.50.30", message="test", source_ip="192.168.50.30",
+        )
+        response = self.client.get(reverse("dashboard:update_alert_status", args=[alert.pk]), {"status": "resolved"})
+        self.assertEqual(response.status_code, 405)
+        alert.refresh_from_db()
+        self.assertEqual(alert.status, "active")
+        self.client.post(reverse("dashboard:update_alert_status", args=[alert.pk]), {"status": "acknowledged"})
+        alert.refresh_from_db()
+        self.assertEqual(alert.status, "acknowledged")
+        self.assertFalse(alert.is_resolved)
+        self.client.post(reverse("dashboard:update_alert_status", args=[alert.pk]), {"status": "resolved"})
+        alert.refresh_from_db()
+        self.assertEqual(alert.status, "resolved")
+        self.assertTrue(alert.is_resolved)
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_dashboard_active_alert_count_excludes_acknowledged_resolved_and_out_of_scope(self):
+        self.client.force_login(self.user)
+        device = Device.objects.create(ip_address="192.168.50.31", status="online")
+        out_device = Device.objects.create(ip_address="192.168.60.31", status="online")
+        Alert.objects.create(device=device, alert_type="new_device", severity="medium", status="active", title="active", message="test", source_ip="192.168.50.31")
+        Alert.objects.create(device=device, alert_type="new_device", severity="medium", status="acknowledged", title="ack", message="test", source_ip="192.168.50.31")
+        Alert.objects.create(device=device, alert_type="new_device", severity="medium", status="resolved", title="resolved", message="test", source_ip="192.168.50.31")
+        Alert.objects.create(device=out_device, alert_type="new_device", severity="medium", status="active", title="scope-excluded-alert", message="test", source_ip="192.168.60.31")
+        response = self.client.get(reverse("dashboard:index"))
+        self.assertEqual(response.context["active_alerts"], 1)
+        alerts_response = self.client.get(reverse("dashboard:alerts"))
+        self.assertContains(alerts_response, "active")
+        self.assertNotContains(alerts_response, "scope-excluded-alert")

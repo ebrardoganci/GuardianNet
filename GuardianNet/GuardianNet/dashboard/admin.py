@@ -12,8 +12,8 @@ class DeviceAdmin(admin.ModelAdmin):
 
 @admin.register(Alert)
 class AlertAdmin(admin.ModelAdmin):
-    list_display = ("title", "alert_type", "severity", "status", "source_ip", "device", "created_at")
-    list_filter = ("alert_type", "severity", "status", "created_at")
+    list_display = ("title", "alert_type", "severity", "status", "source_ip", "device", "created_at", "updated_at")
+    list_filter = ("alert_type", "severity", "status", "created_at", "updated_at")
     search_fields = ("title", "message", "source_ip", "source_mac")
 
 

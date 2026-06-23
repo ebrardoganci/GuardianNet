@@ -110,6 +110,12 @@ Cihazlar sayfası real modda yalnızca kullanılan subnet içindeki kayıtları 
 
 Cihaz envanterinde tüm/online/offline/yeni/uyarısı olan cihaz filtreleri, son taramada görülme bilgisi ve bağlı aktif uyarı sayısı bulunur. Cihaz detayında ilişkili uyarılar ve IP/MAC değişimi gibi güvenlik olayları incelenebilir.
 
+## Uyarı Yönetimi
+
+Uyarılar `active`, `acknowledged` veya `resolved` durumunda tutulur. `active` henüz ele alınmamış uyarıdır; `acknowledged` kullanıcının gördüğü ve incelemeye aldığı uyarıdır; `resolved` kapatılmış uyarıdır. Dashboard aktif uyarı sayısı yalnızca real-scope içindeki `status="active"` kayıtları sayar; acknowledged/resolved ve demo/fallback kapsam dışı kayıtlar bu sayıya girmez.
+
+Uyarılar sayfasında filtreleme yapılabilir ve her uyarı POST aksiyonlarıyla “İncelendi”, “Çözüldü” veya “Aktif yap” durumuna alınabilir. Cihaz detay sayfasındaki ilişkili uyarılar için de aynı aksiyonlar kullanılabilir.
+
 ## Test
 
 ```powershell

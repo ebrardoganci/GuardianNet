@@ -14,7 +14,7 @@
 <div class="grid-2">
   <section class="panel">
     <h2>İlişkili Uyarılar</h2>
-    <div class="table-wrap"><table><thead><tr><th>Tip</th><th>Başlık</th><th>Seviye</th><th>Durum</th><th>Zaman</th></tr></thead><tbody>{% for item in alerts %}<tr><td>{{ item.get_alert_type_display }}</td><td>{{ item.title }}</td><td><span class="badge severity-{{ item.severity }}">{{ item.get_severity_display }}</span></td><td>{{ item.get_status_display }}</td><td>{{ item.created_at|date:'d.m.Y H:i' }}</td></tr>{% empty %}<tr><td colspan="5">İlişkili uyarı yok.</td></tr>{% endfor %}</tbody></table></div>
+    <div class="table-wrap"><table><thead><tr><th>Tip</th><th>Başlık</th><th>Seviye</th><th>Durum</th><th>Oluşturulma</th><th>Güncellenme</th><th>Aksiyon</th></tr></thead><tbody>{% for item in alerts %}<tr><td>{{ item.get_alert_type_display }}</td><td>{{ item.title }}</td><td><span class="badge severity-{{ item.severity }}">{{ item.get_severity_display }}</span></td><td>{{ item.get_status_display }}</td><td>{{ item.created_at|date:'d.m.Y H:i' }}</td><td>{{ item.updated_at|date:'d.m.Y H:i' }}</td><td><form method="post" action="{% url 'dashboard:update_alert_status' item.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button name="status" value="acknowledged" type="submit">İncelendi</button><button name="status" value="resolved" type="submit">Çözüldü</button><button name="status" value="active" type="submit">Aktif yap</button></form></td></tr>{% empty %}<tr><td colspan="7">İlişkili uyarı yok.</td></tr>{% endfor %}</tbody></table></div>
   </section>
   <section class="panel">
     <h2>İlişkili Güvenlik Olayları</h2>

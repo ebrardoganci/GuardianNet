@@ -8,6 +8,7 @@ from django.db.models.functions import TruncDate
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from .models import Alert, Device, HoneypotEvent, MonitoringCycleRun, NetworkScan, RiskSnapshot, SecurityEvent, SystemSetting
 from .services.honeypot_manager import get_honeypot_status
@@ -32,11 +33,18 @@ DEVICE_FILTERS = {
     "new": "Yeni cihazlar",
     "alerts": "Uyarisi olan cihazlar",
 }
+ALERT_STATUS_FILTERS = {
+    "all": "Tumu",
+    "active": "Active",
+    "acknowledged": "Acknowledged",
+    "resolved": "Resolved",
+}
+ALERT_ACTION_STATUSES = {"active", "acknowledged", "resolved"}
 
 
 def _risk_context():
     _, alerts_qs, events_qs, _ = _data_sources()
-    calculated = calculate_risk(alerts_qs.exclude(status="resolved"), events_qs)
+    calculated = calculate_risk(alerts_qs.filter(status="active"), events_qs)
     if is_real_mode():
         return calculated
     latest = RiskSnapshot.objects.first()
@@ -161,7 +169,50 @@ def device_detail(request, pk):
 
 @login_required
 def alerts(request):
-    return render(request, "dashboard/alerts.html", {"alerts": _data_sources()[1]})
+    alerts_qs = _data_sources()[1].select_related("device")
+    status_filter = request.GET.get("status", "all")
+    severity_filter = request.GET.get("severity", "all")
+    type_filter = request.GET.get("type", "all")
+    if status_filter not in ALERT_STATUS_FILTERS:
+        status_filter = "all"
+    severity_values = {value for value, _ in Alert.SEVERITY_CHOICES}
+    type_values = {value for value, _ in Alert.ALERT_TYPE_CHOICES}
+    if severity_filter != "all" and severity_filter not in severity_values:
+        severity_filter = "all"
+    if type_filter != "all" and type_filter not in type_values:
+        type_filter = "all"
+    if status_filter != "all":
+        alerts_qs = alerts_qs.filter(status=status_filter)
+    if severity_filter != "all":
+        alerts_qs = alerts_qs.filter(severity=severity_filter)
+    if type_filter != "all":
+        alerts_qs = alerts_qs.filter(alert_type=type_filter)
+    return render(request, "dashboard/alerts.html", {
+        "alerts": alerts_qs,
+        "status_filters": ALERT_STATUS_FILTERS,
+        "severity_filters": Alert.SEVERITY_CHOICES,
+        "type_filters": Alert.ALERT_TYPE_CHOICES,
+        "active_status_filter": status_filter,
+        "active_severity_filter": severity_filter,
+        "active_type_filter": type_filter,
+    })
+
+
+@login_required
+@require_POST
+def update_alert_status(request, pk):
+    new_status = request.POST.get("status", "")
+    next_url = request.POST.get("next", "")
+    redirect_target = next_url if next_url.startswith("/") else None
+    if new_status not in ALERT_ACTION_STATUSES:
+        messages.error(request, "Gecersiz uyari durumu.")
+        return redirect(redirect_target or "dashboard:alerts")
+    queryset = real_alerts(Alert.objects.all()) if is_real_mode() else Alert.objects.all()
+    alert = get_object_or_404(queryset, pk=pk)
+    alert.status = new_status
+    alert.save(update_fields=["status", "is_resolved", "updated_at"])
+    messages.success(request, "Uyari durumu guncellendi.")
+    return redirect(redirect_target or "dashboard:alerts")
 
 
 @login_required
