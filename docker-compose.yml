@@ -1,0 +1,11 @@
+services:
+  opencanary:
+    build: ./opencanary
+    profiles: ["honeypot"]
+    restart: unless-stopped
+    ports:
+      - "2121:2121"
+      - "2222:2222"
+      - "8080:8080"
+    volumes:
+      - ./logs:/var/tmp/opencanary

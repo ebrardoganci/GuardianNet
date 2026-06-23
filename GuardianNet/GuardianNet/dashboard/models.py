@@ -93,7 +93,9 @@ class NetworkScan(models.Model):
     status = models.CharField("Durum", max_length=20, choices=STATUS_CHOICES, default="demo")
     devices_found = models.PositiveIntegerField("Bulunan cihaz", default=0)
     is_mock = models.BooleanField("Mock veri", default=True)
+    scan_method = models.CharField("Tarama yontemi", max_length=30, blank=True)
     message = models.CharField("Aciklama", max_length=255, blank=True)
+    notes = models.TextField("Notlar", blank=True)
     started_at = models.DateTimeField("Baslangic", auto_now_add=True)
     completed_at = models.DateTimeField("Bitis", blank=True, null=True)
 
@@ -107,10 +109,14 @@ class NetworkScan(models.Model):
 class HoneypotEvent(models.Model):
     SERVICE_CHOICES = [("ssh", "SSH"), ("http", "HTTP"), ("ftp", "FTP")]
 
+    event_id = models.CharField("Log kimligi", max_length=64, unique=True, blank=True, null=True)
     source_ip = models.GenericIPAddressField("Kaynak IP")
     service = models.CharField("Servis", max_length=20, choices=SERVICE_CHOICES)
     username = models.CharField("Kullanici adi", max_length=100, blank=True)
     command = models.CharField("Kaydedilen istek/komut", max_length=255, blank=True)
+    destination_port = models.PositiveIntegerField("Hedef port", blank=True, null=True)
+    login_success = models.BooleanField("Giris basarili", default=False)
+    raw_data = models.JSONField("Ham log", default=dict, blank=True)
     is_mock = models.BooleanField("Mock veri", default=True)
     created_at = models.DateTimeField("Olusturulma tarihi", auto_now_add=True)
 

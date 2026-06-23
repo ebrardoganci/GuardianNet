@@ -26,16 +26,16 @@ class SecurityEventAdmin(admin.ModelAdmin):
 
 @admin.register(NetworkScan)
 class NetworkScanAdmin(admin.ModelAdmin):
-    list_display = ("network_range", "status", "devices_found", "is_mock", "started_at", "completed_at")
-    list_filter = ("status", "is_mock", "started_at")
-    search_fields = ("network_range", "message")
+    list_display = ("network_range", "status", "scan_method", "devices_found", "is_mock", "started_at", "completed_at")
+    list_filter = ("status", "scan_method", "is_mock", "started_at")
+    search_fields = ("network_range", "message", "notes")
 
 
 @admin.register(HoneypotEvent)
 class HoneypotEventAdmin(admin.ModelAdmin):
-    list_display = ("source_ip", "service", "username", "command", "is_mock", "created_at")
-    list_filter = ("service", "is_mock", "created_at")
-    search_fields = ("source_ip", "username", "command")
+    list_display = ("source_ip", "service", "destination_port", "username", "login_success", "is_mock", "created_at")
+    list_filter = ("service", "login_success", "is_mock", "created_at")
+    search_fields = ("event_id", "source_ip", "username", "command")
 
 
 @admin.register(SystemSetting)

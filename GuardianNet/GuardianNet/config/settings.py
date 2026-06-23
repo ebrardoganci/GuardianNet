@@ -10,10 +10,15 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def env_bool(name, default=False):
+    return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
 
 
 # Quick-start development settings - unsuitable for production
@@ -125,3 +130,15 @@ STATICFILES_DIRS = [BASE_DIR / 'static']
 LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/dashboard/"
 LOGOUT_REDIRECT_URL = "/login/"
+
+# GuardianNet runtime configuration. Environment variables override these safe defaults.
+GUARDIANNET_MODE = os.getenv("GUARDIANNET_MODE", "real").strip().lower()
+LOCAL_SUBNET = os.getenv("LOCAL_SUBNET", "").strip()
+SCAN_INTERVAL_SECONDS = int(os.getenv("SCAN_INTERVAL_SECONDS", "300"))
+OPENCANARY_LOG_PATH = os.getenv("OPENCANARY_LOG_PATH", str(BASE_DIR.parent.parent / "logs" / "opencanary.log"))
+ENABLE_REAL_SCAN = env_bool("ENABLE_REAL_SCAN", True)
+ENABLE_HONEYPOT_LOGS = env_bool("ENABLE_HONEYPOT_LOGS", True)
+NETWORK_SCAN_MAX_HOSTS = int(os.getenv("NETWORK_SCAN_MAX_HOSTS", "1024"))
+PORT_SCAN_THRESHOLD = int(os.getenv("PORT_SCAN_THRESHOLD", "6"))
+BRUTE_FORCE_THRESHOLD = int(os.getenv("BRUTE_FORCE_THRESHOLD", "5"))
+DETECTION_WINDOW_MINUTES = int(os.getenv("DETECTION_WINDOW_MINUTES", "10"))

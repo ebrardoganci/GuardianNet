@@ -1,1 +1,30 @@
-{% extends 'base.html' %}{% block title %}Ayarlar | GuardianNet{% endblock %}{% block content %}<h1>Ayarlar</h1><section class="panel form-panel"><h2>Veri Modu</h2><p>OpenCanary bulunamazsa sistem otomatik olarak demo kayıtlarını göstermeye devam eder.</p><form method="post">{% csrf_token %}<label>Çalışma modu<select name="data_mode"><option value="demo" {% if data_mode == 'demo' %}selected{% endif %}>Demo / Mock</option><option value="opencanary" {% if data_mode == 'opencanary' %}selected{% endif %}>OpenCanary (opsiyonel)</option></select></label><button type="submit">Kaydet</button></form><p>Algılanan honeypot durumu: <strong>{{ honeypot_status.label }}</strong></p></section>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}Ayarlar | GuardianNet{% endblock %}
+{% block content %}
+<h1>Ayarlar</h1>
+<div class="grid-2">
+  <section class="panel form-panel">
+    <h2>Çalışma Ayarları</h2>
+    <form method="post">{% csrf_token %}
+      <label>Çalışma modu
+        <select name="guardiannet_mode"><option value="real" {% if guardiannet_mode == 'real' %}selected{% endif %}>Real</option><option value="demo" {% if guardiannet_mode == 'demo' %}selected{% endif %}>Demo / Mock</option></select>
+      </label>
+      <label>İzinli yerel subnet (boşsa otomatik, otomatik ağ /24 ile sınırlıdır)<input name="local_subnet" value="{{ local_subnet }}" placeholder="192.168.1.0/24"></label>
+      <label>Tarama aralığı (saniye)<input type="number" min="30" name="scan_interval_seconds" value="{{ scan_interval_seconds }}"></label>
+      <label>OpenCanary log yolu<input name="opencanary_log_path" value="{{ opencanary_log_path }}"></label>
+      <label><input type="checkbox" name="enable_real_scan" {% if enable_real_scan %}checked{% endif %}> Gerçek cihaz keşfini etkinleştir</label>
+      <label><input type="checkbox" name="enable_honeypot_logs" {% if enable_honeypot_logs %}checked{% endif %}> Honeypot loglarını etkinleştir</label>
+      <button type="submit">Kaydet</button>
+    </form>
+  </section>
+  <section class="panel">
+    <h2>Sistem Durumu</h2>
+    <p>Algılanan local subnet: <strong>{{ detected_subnet }}</strong></p>
+    <p>Gerçek tarama: <strong>{{ enable_real_scan|yesno:'Aktif,Kapalı' }}</strong></p>
+    <p>Honeypot: <strong>{{ honeypot_status.label }}</strong></p>
+    <p>Log yolu: <strong>{{ honeypot_status.log_path }}</strong></p>
+    <p>Son network scan: <strong>{% if last_scan %}{{ last_scan.started_at|date:'d.m.Y H:i' }} ({{ last_scan.get_status_display }}){% else %}Henüz çalışmadı{% endif %}</strong></p>
+    <p>Son honeypot ingest: <strong>{{ last_ingest }}</strong></p>
+  </section>
+</div>
+{% endblock %}
