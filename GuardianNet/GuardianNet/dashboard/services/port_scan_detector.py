@@ -38,8 +38,8 @@ def analyze_port_scan_logs(threshold=None, minutes=None):
         source_ip = finding["source_ip"]
         message = f"{minutes} dakika icinde {finding['unique_ports']} farkli port/servis gozlemlendi."
         Alert.objects.get_or_create(alert_type="port_scan", source_ip=source_ip, status="active",
-                                    defaults={"severity": "high", "title": "Port tarama davranisi", "message": message})
+                                    defaults={"severity": "high", "title": "Olasi port tarama davranisi", "message": message})
         SecurityEvent.objects.get_or_create(event_type="port_scan", source_ip=source_ip,
-                                            title=f"Port tarama suphesi {bucket}",
+                                            title=f"Olasi port tarama davranisi {bucket}",
                                             defaults={"description": message, "level": "danger", "risk_score": 75})
     return findings

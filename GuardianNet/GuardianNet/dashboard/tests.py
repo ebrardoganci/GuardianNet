@@ -12,11 +12,11 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .models import Alert, Device, HoneypotEvent, MonitoringCycleRun, RiskSnapshot, SecurityEvent
-from .services.arp_monitor import detect_arp_anomalies
-from .services.bruteforce_detector import detect_bruteforce
+from .services.arp_monitor import analyze_arp_observations, detect_arp_anomalies
+from .services.bruteforce_detector import analyze_bruteforce_logs, analyze_ssh_attempt_logs, detect_bruteforce
 from .services.honeypot_manager import ingest_honeypot_logs
 from .services.network_scanner import resolve_target_subnet, scan_network
-from .services.port_scan_detector import detect_port_scan
+from .services.port_scan_detector import analyze_port_scan_logs, detect_port_scan
 from .services.runtime_health import get_runtime_health
 
 
@@ -41,6 +41,7 @@ class DashboardMVPTests(TestCase):
 
     def test_detection_services_only_analyze_supplied_data(self):
         self.assertEqual(len(detect_arp_anomalies([{"ip_address": "192.168.1.1", "mac_address": "aa"}, {"ip_address": "192.168.1.1", "mac_address": "bb"}])), 1)
+        self.assertEqual(len(detect_arp_anomalies([{"ip_address": "192.168.1.10", "mac_address": "aa"}, {"ip_address": "192.168.1.11", "mac_address": "aa"}])), 1)
         self.assertEqual(len(detect_port_scan([{"source_ip": "192.168.1.2", "destination_port": port} for port in range(1, 9)])), 1)
         self.assertEqual(len(detect_bruteforce([{"source_ip": "192.168.1.3", "success": False}] * 5)), 1)
 
@@ -65,6 +66,7 @@ class DashboardMVPTests(TestCase):
         response = self.client.get(reverse("dashboard:devices"))
         self.assertContains(response, "192.168.50.10")
         self.assertContains(response, "Offline")
+        self.assertContains(response, "Yeni/bilinmeyen cihaz")
         self.assertNotContains(response, "192.168.60.10")
 
     @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24", ENABLE_REAL_SCAN=True)
@@ -200,11 +202,11 @@ class DashboardMVPTests(TestCase):
         response = self.client.get(reverse("dashboard:index"))
 
         self.assertContains(response, "Cycle 24.06 01:27")
-        self.assertContains(response, "Scan found/new")
-        self.assertContains(response, "Honeypot read/created")
+        self.assertContains(response, "Scan bulunan/yeni")
+        self.assertContains(response, "Honeypot okunan/eklenen")
         self.assertContains(response, "1 duplicate")
         self.assertContains(response, "8 ignored")
-        self.assertContains(response, "Risk score")
+        self.assertContains(response, "Risk puanı")
         self.assertContains(response, "Son Honeypot Olayları")
         self.assertContains(response, "SSH bağlantı denemesi algılandı")
         self.assertContains(response, "Honeypot")
@@ -236,6 +238,66 @@ class DashboardMVPTests(TestCase):
         self.assertEqual(run.honeypot_ignored_lines, 0)
         self.assertEqual(Device.objects.count(), 0)
         self.assertEqual(HoneypotEvent.objects.count(), 0)
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_ssh_honeypot_attempt_creates_user_visible_alert(self):
+        HoneypotEvent.objects.create(
+            source_ip="192.168.50.41",
+            service="ssh",
+            username="adminuser",
+            destination_port=2222,
+            is_mock=False,
+        )
+
+        findings = analyze_ssh_attempt_logs(minutes=10)
+
+        self.assertEqual(len(findings), 1)
+        self.assertTrue(Alert.objects.filter(alert_type="honeypot", title__icontains="SSH").exists())
+        self.assertTrue(SecurityEvent.objects.filter(event_type="honeypot", protocol="SSH", source_ip="192.168.50.41").exists())
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("dashboard:alerts"))
+        self.assertContains(response, "SSH bağlantı denemesi algılandı")
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_honeypot_port_scan_and_bruteforce_analysis_create_alerts(self):
+        for port, service in [(2222, "ssh"), (8080, "http"), (2121, "ftp")]:
+            HoneypotEvent.objects.create(source_ip="192.168.50.42", service=service, destination_port=port, is_mock=False)
+        for _ in range(3):
+            HoneypotEvent.objects.create(source_ip="192.168.50.43", service="ssh", username="adminuser", destination_port=2222, is_mock=False)
+
+        port_findings = analyze_port_scan_logs(threshold=3, minutes=10)
+        brute_findings = analyze_bruteforce_logs(threshold=3, minutes=10)
+
+        self.assertEqual(len(port_findings), 1)
+        self.assertEqual(len(brute_findings), 1)
+        self.assertTrue(Alert.objects.filter(alert_type="port_scan", title__icontains="port").exists())
+        self.assertTrue(Alert.objects.filter(alert_type="brute_force", title__icontains="SSH").exists())
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_arp_spoofing_analysis_creates_alert_from_existing_observations(self):
+        findings = analyze_arp_observations([
+            {"ip_address": "192.168.50.44", "mac_address": "00:11:22:33:44:55"},
+            {"ip_address": "192.168.50.45", "mac_address": "00:11:22:33:44:55"},
+        ])
+
+        self.assertEqual(len(findings), 1)
+        self.assertTrue(Alert.objects.filter(alert_type="arp_spoof", title__icontains="ARP").exists())
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_reports_page_contains_chart_data_when_database_has_events(self):
+        self.client.force_login(self.user)
+        Device.objects.create(ip_address="192.168.50.46", status="online", is_trusted=False, risk_score=20)
+        HoneypotEvent.objects.create(source_ip="192.168.50.47", service="ssh", destination_port=2222, is_mock=False)
+        SecurityEvent.objects.create(event_type="honeypot", title="SSH event", description="test", source_ip="192.168.50.47", protocol="SSH", risk_score=35)
+        RiskSnapshot.objects.create(risk_level="low", risk_score=13, security_score=87, active_alerts=1)
+
+        response = self.client.get(reverse("dashboard:reports"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "daily-chart-data")
+        self.assertContains(response, "risk-chart-data")
+        self.assertContains(response, "device-report-chart-data")
+        self.assertContains(response, "service-chart-data")
 
     @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
     def test_alert_status_update_requires_post_and_updates_status(self):

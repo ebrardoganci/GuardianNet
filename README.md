@@ -1,56 +1,83 @@
 # GuardianNet
 
-GuardianNet, izinli yerel ağlarda cihaz keşfi, güvenlik log analizi ve honeypot gözlemi yapan Django tabanlı savunma projesidir. Exploit, port saldırısı veya parola denemesi gerçekleştirmez.
+## Project Overview / Proje Özeti
 
-## Kurulum
+GuardianNet, izinli lokal ağlarda cihaz keşfi, honeypot log takibi, güvenlik olayı analizi ve risk puanı üretimi yapan Django tabanlı savunma projesidir. Proje gerçek saldırı aracı değildir; exploit, parola denemesi, kalıcılık, zararlı yazılım veya izinsiz tarama gerçekleştirmez.
+
+## Features
+
+- Login page ve Django auth tabanlı oturum.
+- Dashboard üzerinde genel ağ durumu, cihaz sayıları, risk/güvenlik puanı ve son monitoring cycle özeti.
+- Devices page ile IP, MAC, hostname/vendor, online/offline, ilk/son görülme ve yeni/bilinmeyen cihaz etiketi.
+- Alerts page ile yeni cihaz, SSH honeypot, SSH brute force şüphesi, port tarama davranışı ve ARP spoofing şüphesi uyarıları.
+- Reports page ile Chart.js grafiklerinde günlük olay, risk geçmişi, cihaz durumu ve honeypot servis dağılımı.
+- OpenCanary honeypot entegrasyonu: SSH, HTTP ve FTP sahte servisleri.
+- Monitoring cycle: network scan + honeypot ingest + analysis + risk update.
+- Real mode'da demo/fallback veri üretmeden çalışma.
+
+## Technology Stack
+
+- Python, Django, SQLite
+- Nmap host discovery ve Scapy ARP discovery
+- Docker Desktop ve OpenCanary
+- Chart.js
+- Windows Task Scheduler için `.bat` script desteği
+
+## Architecture
+
+- `dashboard/models.py`: Device, Alert, SecurityEvent, HoneypotEvent, RiskSnapshot, MonitoringCycleRun modelleri.
+- `dashboard/services/network_scanner.py`: izinli özel subnet içinde cihaz keşfi ve yeni/bilinmeyen cihaz uyarısı.
+- `dashboard/services/honeypot_manager.py`: OpenCanary JSON log ingest işlemi.
+- `dashboard/services/security_analysis.py`: ARP, port scan, SSH attempt/brute force ve risk analizi.
+- `dashboard/services/risk_engine.py`: risk skoru ve güvenlik puanı üretimi.
+- `docker-compose.yml` ve `opencanary/opencanary.conf`: lokal OpenCanary servisleri.
+
+## Environment Configuration
+
+Proje kökündeki `.env` otomatik okunur ve kaynak kontrole eklenmez.
+
+```env
+GUARDIANNET_MODE=real
+LOCAL_SUBNET=192.168.1.0/24
+ENABLE_REAL_SCAN=True
+ENABLE_HONEYPOT_LOGS=True
+OPENCANARY_LOG_PATH=logs/opencanary.log
+MONITORING_CYCLE_SCAN_LIMIT=10
+PORT_SCAN_THRESHOLD=6
+BRUTE_FORCE_THRESHOLD=5
+DETECTION_WINDOW_MINUTES=10
+OPENCANARY_FTP_PORT=2121
+OPENCANARY_SSH_PORT=2222
+OPENCANARY_HTTP_PORT=8080
+```
+
+`LOCAL_SUBNET` uygulama koduna sabitlenmez; `.env` veya runtime settings içinden gelir.
+
+## Demo Mode vs Real Mode
+
+- **Real mode:** Yalnızca kullanıcının kendi izinli RFC1918 özel ağı için host discovery yapar. Public IP taranmaz. Nmap/Scapy/OpenCanary yoksa demo/fallback veri üretmez.
+- **Demo mode:** Dokümantasyon IP bloklarından örnek kayıt üretir. Gerçek ağ veya gerçek honeypot sonucu gibi kullanılmamalıdır.
+
+## Local Network Scan
 
 Komutlar `manage.py` dosyasının bulunduğu dizinde çalıştırılır:
 
 ```powershell
 cd GuardianNet\GuardianNet
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r ..\..\requirements.txt
-python manage.py migrate
-python manage.py seed_demo_data
-python manage.py createsuperuser
-python manage.py runserver
-```
-
-Arayüz: `http://127.0.0.1:8000/login/`
-
-## Çalışma Modları
-
-- **Real:** Yalnızca RFC1918 özel ağlarında (`10/8`, `172.16/12`, `192.168/16`) cihaz keşfi dener. Otomatik algılanan ağ `/24` ile sınırlandırılır. Public IP taranmaz ve port taraması yapılmaz.
-- **Demo:** Dokümantasyon IP bloklarından sabit örnek kayıtlar kullanır.
-- Gerçek keşif veya OpenCanary logu yoksa Django çalışmaya devam eder; real modda demo/fallback kayıt üretilmez.
-
-`.env.example` desteklenen değişkenleri belgeler. Proje kökündeki `.env` otomatik yüklenir; `.env` dosyası kaynak kontrole eklenmemelidir. Aynı ayarlar web arayüzündeki Ayarlar sayfasından `SystemSetting` tablosuna da kaydedilebilir.
-
-## Gerçek Cihaz Keşfi
-
-Keşif sırası:
-
-1. `psutil` aktif özel IPv4 arayüzünü ve subnet'i belirler.
-2. Nmap varsa yalnızca host discovery için `nmap -sn` çalışır.
-3. Nmap yoksa Scapy ile yerel ARP discovery denenir.
-4. İkisi de kullanılamazsa hata `NetworkScan.notes` alanına yazılır; real modda demo/fallback cihaz üretilmez.
-
-Manuel `LOCAL_SUBNET`, yalnızca sahibi olduğunuz veya açıkça izin verilmiş özel ağ olmalıdır. Varsayılan host limiti 1024'tür.
-
-```powershell
 python manage.py run_network_scan
 ```
 
-### Windows'ta Nmap
+Nmap varsa `nmap -sn` ile yalnızca host discovery yapılır. Nmap yoksa Scapy ARP discovery denenir. Port taraması veya saldırı işlemi yapılmaz.
 
-Nmap'in resmi Windows kurucusunu kullanın, kurulum sırasında Npcap seçeneğini etkinleştirin ve yeni terminalde `nmap --version` ile doğrulayın. Scapy ARP keşfi de Npcap ve yönetici yetkisi gerektirebilir.
+## Honeypot with OpenCanary
 
-WSL/Ubuntu, OpenCanary ve Linux ağ araçları için daha sorunsuz bir ortamdır. WSL içindeki sanal ağın fiziksel LAN görünürlüğünün Windows yapılandırmasına bağlı olduğunu unutmayın.
+OpenCanary Docker ile çalışır. SSH, HTTP ve FTP sahte servisleri lokal geliştirme için şu host portlarını kullanır:
 
-## OpenCanary
+- SSH: `2222`
+- HTTP: `8080`
+- FTP: `2121`
 
-Docker opsiyoneldir; Django Docker olmadan da çalışır. OpenCanary container'ı başlatmak için Docker Desktop çalışır durumdayken proje kökünde:
+Başlatma:
 
 ```powershell
 docker compose up --build -d
@@ -58,178 +85,130 @@ docker compose ps
 docker compose logs --tail=100
 ```
 
-Container'ı durdurmak için:
+Durdurma:
 
 ```powershell
 docker compose down
 ```
 
-Örnek servisler host üzerinde yalnızca lokal geliştirme için `2121` (FTP), `2222` (SSH) ve `8080` (HTTP) portlarını kullanır. Bu portlardan biri doluysa `.env` içinde `OPENCANARY_FTP_PORT`, `OPENCANARY_SSH_PORT` veya `OPENCANARY_HTTP_PORT` değerini değiştirin; container iç portları aynı kalır. OpenCanary JSON lines log hedefi repo kökündeki `logs/opencanary.log` dosyasıdır. Compose mount'u `./logs:/var/tmp/opencanary` şeklindedir ve container içindeki `/var/tmp/opencanary/opencanary.log` dosyası Django tarafından `.env` içindeki göreli path ile okunur:
+Port çakışması olursa `.env` içindeki `OPENCANARY_SSH_PORT`, `OPENCANARY_HTTP_PORT` veya `OPENCANARY_FTP_PORT` değerini kendi makinenize göre değiştirin. OpenCanary log hedefi `logs/opencanary.log` dosyasıdır ve bu dosya commitlenmez.
 
-```env
-OPENCANARY_LOG_PATH=logs/opencanary.log
-ENABLE_HONEYPOT_LOGS=True
-# Opsiyonel host port degisiklikleri:
-OPENCANARY_FTP_PORT=2121
-OPENCANARY_SSH_PORT=2222
-OPENCANARY_HTTP_PORT=8080
-```
+## Dashboard
 
-Logları Django veritabanına aktarmak için `manage.py` dizininde çalıştırın:
+Dashboard şu bilgileri gösterir:
 
-```powershell
-python manage.py ingest_honeypot_logs
-```
+- Genel ağ durumu ve aktif cihaz sayısı
+- Risk seviyesi ve güvenlik puanı
+- Honeypot durumu
+- Son monitoring cycle özeti
+- Son honeypot olayları
+- Son saldırı / güvenlik olayları
+- "SSH bağlantı denemesi algılandı" uyarısı
 
-Komut kaç satır okunduğunu, kaç gerçek event eklendiğini, kaç duplicate atlandığını, kaç non-event satırın yok sayıldığını ve kaç parse hatası olduğunu raporlar. OpenCanary'nin `Canary running` veya servis başlatma gibi lifecycle JSON satırları gerçek honeypot eventi sayılmaz ve `ignored` olarak raporlanır. Log dosyası yoksa hata koduyla çıkmaz; dashboard Honeypot sayfasında “OpenCanary logu bulunamadı” görünür. Log dosyası var ama gerçek event yoksa “Henüz gerçek honeypot olayı yok” boş durumu gösterilir.
+Dashboard üzerindeki **Monitoring Cycle Çalıştır** butonu network scan + honeypot ingest + analysis + risk update akışını çalıştırır.
 
-Health check için:
+## Devices Page
 
-```powershell
-python manage.py check_runtime_health
-```
+Devices page, izinli lokal ağ kapsamındaki cihazları listeler. IP, MAC, hostname/vendor, online/offline durum, ilk görülme, son görülme, son taramada görülme, aktif uyarı sayısı ve yeni/bilinmeyen cihaz etiketi gösterilir.
 
-OpenCanary container başladıktan sonra `logs/opencanary.log` oluşmalı ve health check'te OpenCanary log dosyası OK görünmelidir. Dosya yoksa bu hata değil warning olarak kalır; Django fake/demo honeypot event üretmez. Windows'ta Docker Desktop'ın Linux engine'i açık olmalı ve repo klasörü volume sharing erişimine sahip olmalıdır; OneDrive altındaki repo yollarında Docker dosya paylaşım izinlerini ayrıca kontrol etmek gerekebilir.
+## Alerts Page
 
-Güvenli parser testi için otomatik kullanılmayan örnek dosya vardır:
+Alerts page, teknik olmayan kullanıcı için "ne olmuş?" sorusuna cevap veren özetlerle çalışır:
 
-```powershell
-python manage.py ingest_honeypot_logs --path ..\..\logs\opencanary.sample.jsonl
-```
+- Yeni/bilinmeyen cihaz ağa bağlandı
+- SSH bağlantı denemesi algılandı
+- Olası SSH brute force denemesi
+- Olası port tarama davranışı
+- Olası ARP spoofing şüphesi
 
-Bu örnek gerçek OpenCanary yerine geçmez ve dashboard real modda kendiliğinden fake veri üretmez.
+Uyarılar `active`, `acknowledged` veya `resolved` durumuna alınabilir.
 
-## Savunma Analizi
+## Reports Page
 
-```powershell
-python manage.py ingest_honeypot_logs
-python manage.py analyze_security
-```
+Reports page Chart.js ile şu grafikleri gösterir:
 
-İlk komut OpenCanary loglarını aktarır ve port/servis çeşitliliği ile başarısız SSH kayıtlarını analiz eder. İkinci komut ARP eşleşme anomalisi, port tarama şüphesi ve kaba kuvvet şüphesi kontrollerini çalıştırıp risk snapshot'ı üretir.
+- Günlük honeypot / güvenlik olayı sayısı
+- Risk skoru geçmişi
+- Cihaz durumu
+- Honeypot servis dağılımı
 
-Risk puanı aktif uyarı, yüksek/kritik önem, güvenilmeyen cihaz, gerçek honeypot olayı ve son 24 saatteki savunma tespitlerine göre hesaplanır. `security_score = 100 - risk_score` olarak tutulur.
+Veri yoksa grafik yerine "Henüz raporlanacak veri yok." mesajı gösterilir. JSON chart verileri Django `json_script` filtresiyle güvenli aktarılır.
 
-## Monitoring Cycle
-
-Gerçek kullanımda ağ keşfi, OpenCanary log aktarımı ve risk analizini tek komutla çalıştırabilirsiniz:
-
-```powershell
-python manage.py run_monitoring_cycle
-python manage.py run_monitoring_cycle --scan-limit 10
-python manage.py run_monitoring_cycle --skip-honeypot
-```
-
-Dashboard ana sayfasındaki **Monitoring Cycle Çalıştır** butonu da aynı servis akışını POST ile çalıştırır. Formdaki scan limit alanı cihaz sayısını sabitlemez; yalnızca taranacak host hedeflerini sınırlar. Varsayılan değer `.env` içindeki `MONITORING_CYCLE_SCAN_LIMIT` ile değiştirilebilir.
-
-`--scan-limit` cihaz sayısını sabitlemez; yalnızca taranacak host hedeflerini sınırlar. Gerektiğinde `--skip-scan`, `--skip-honeypot` veya `--skip-analysis` ile bir adımı atlayabilirsiniz. Windows'ta gerçek ağ keşfi için Nmap ve Npcap kurulu olmalı; yoksa Scapy ARP keşfi denenir ve o da çalışmazsa real modda demo/fallback veri üretilmez.
-
-Her çalıştırma `MonitoringCycleRun` olarak kaydedilir. Dashboard ana sayfasındaki **Son Monitoring Cycle** paneli son çalışma zamanını, scan/honeypot/analiz özetini, ignored/parse error sayılarını ve varsa hata özetini gösterir. Dashboard sayfası 60 saniyede bir otomatik yenilenir ve üst bölümde son render zamanı görünür. Periyodik kullanım için Windows Task Scheduler veya Linux/macOS cron ile aynı `python manage.py run_monitoring_cycle --scan-limit 10` komutu zamanlanabilir.
-
-## Runtime / Sistem Sağlığı
-
-Gerçek modun hazır olup olmadığını tek yerden görmek için:
-
-```powershell
-python manage.py check_runtime_health
-```
-
-Komut `GUARDIANNET_MODE`, `LOCAL_SUBNET`, kullanılan subnet, real scan ve honeypot ayarları, Nmap/Npcap/Scapy erişilebilirliği, OpenCanary log yolu, logs klasörü ve son `NetworkScan` / `MonitoringCycleRun` / `RiskSnapshot` kayıtlarını OK/WARNING/ERROR olarak raporlar. Aynı kontroller web arayüzünde **Ayarlar > Sistem Sağlığı** tablosunda görünür.
-
-Nmap bulunamazsa Windows'ta PATH ve Npcap kurulumunu kontrol edin. OpenCanary log dosyası yoksa bu tek başına hata değildir; henüz log üretilmemiş olabilir veya `OPENCANARY_LOG_PATH` farklı bir dosyayı gösteriyor olabilir.
-
-## Cihaz Envanteri
-
-Cihazlar sayfası real modda yalnızca kullanılan subnet içindeki kayıtları ana listede gösterir. Eski veya farklı subnet kayıtları silinmez; ana dashboard sayıları ve cihaz listesi gerçek çalışma kapsamına göre filtrelenir. Bir cihaz son gerçek taramada görülürse `online`, daha önce görülmüş ama son taramada görülmemişse `offline` kabul edilir. Offline'a çekilen cihazın `last_seen` zamanı korunur; böylece cihazın en son gerçekten ne zaman görüldüğü kaybolmaz.
-
-Cihaz envanterinde tüm/online/offline/yeni/uyarısı olan cihaz filtreleri, son taramada görülme bilgisi ve bağlı aktif uyarı sayısı bulunur. Cihaz detayında ilişkili uyarılar ve IP/MAC değişimi gibi güvenlik olayları incelenebilir.
-
-## Uyarı Yönetimi
-
-Uyarılar `active`, `acknowledged` veya `resolved` durumunda tutulur. `active` henüz ele alınmamış uyarıdır; `acknowledged` kullanıcının gördüğü ve incelemeye aldığı uyarıdır; `resolved` kapatılmış uyarıdır. Dashboard aktif uyarı sayısı yalnızca real-scope içindeki `status="active"` kayıtları sayar; acknowledged/resolved ve demo/fallback kapsam dışı kayıtlar bu sayıya girmez.
-
-Uyarılar sayfasında filtreleme yapılabilir ve her uyarı POST aksiyonlarıyla “İncelendi”, “Çözüldü” veya “Aktif yap” durumuna alınabilir. Cihaz detay sayfasındaki ilişkili uyarılar için de aynı aksiyonlar kullanılabilir.
-
-## Running a monitoring cycle manually
-
-Run the monitoring cycle from the Django `manage.py` directory:
+## Running a Monitoring Cycle Manually
 
 ```powershell
 cd GuardianNet\GuardianNet
 python manage.py run_monitoring_cycle --scan-limit 10
 ```
 
-The command runs the same defensive workflow as the dashboard button: network scan, honeypot ingest, security analysis, and risk update. `LOCAL_SUBNET` is read from `.env` or saved runtime settings; do not hardcode a subnet in scripts. In real mode GuardianNet does not create demo or fallback data when Nmap, Scapy, OpenCanary, or the log file is unavailable.
+`--scan-limit` cihaz sayısını sabitlemez; taranacak host hedeflerini sınırlar. Gerektiğinde `--skip-scan`, `--skip-honeypot` veya `--skip-analysis` kullanılabilir.
 
-## Running from the dashboard
+## Running from the Dashboard
 
-Use the **Monitoring Cycle Calistir** button on the dashboard to run one cycle from the web UI. The optional scan limit input limits the number of scan targets; it does not set a fixed device count. After completion, the dashboard shows scan found/new counts, honeypot read/created/duplicate/ignored/parse counts, started and finished times, and the latest risk score.
+Dashboard ana sayfasındaki **Monitoring Cycle Çalıştır** butonu aynı monitoring cycle servis akışını POST ile çalıştırır. Başarılı çalıştırmadan sonra yeşil mesajda scan, honeypot ingest ve risk özeti gösterilir.
 
-## Windows Task Scheduler setup
+## Windows Task Scheduler Setup
 
-The repository includes `scripts\run_guardian_cycle.bat` for scheduled Windows runs. The script finds the repo root from its own location, changes into `GuardianNet\GuardianNet`, runs:
+`scripts\run_guardian_cycle.bat` dosyası zamanlanmış çalıştırma için hazırdır. Script repo kökünü kendi konumundan bulur, `GuardianNet\GuardianNet` klasörüne geçer ve çıktıyı `logs\monitoring_cycle_task.log` dosyasına ekler.
 
-```powershell
-python manage.py run_monitoring_cycle --scan-limit 10
-```
+Scripti farklı bir konuma taşırsanız veya kendi bilgisayarınızda sabit yol kullanmak isterseniz path değişkenlerini kendi repo yolunuza göre düzenleyin.
 
-and appends output to `logs\monitoring_cycle_task.log`. If you move the script or prefer a hardcoded path, edit the path variables for your own local repo location first.
+Task Scheduler:
 
-Task Scheduler setup:
+1. Task Scheduler aç.
+2. Create Basic Task seç.
+3. Trigger olarak 15/30/60 dakika veya günlük seç.
+4. Action: Start a program.
+5. Program/script: `scripts\run_guardian_cycle.bat` tam dosya yolu.
+6. Start in: repo kökü veya `scripts` klasörü.
+7. Test için görevi manuel **Run** et.
 
-1. Open Task Scheduler.
-2. Choose **Create Basic Task**.
-3. Choose a trigger such as every 15, 30, or 60 minutes, or daily.
-4. Choose **Start a program**.
-5. Set **Program/script** to the full path of `scripts\run_guardian_cycle.bat`.
-6. Set **Start in** to the repo root or the `scripts` folder.
-7. Use **Run** manually once to test the task.
+## Safe Honeypot Demo Scenario
 
-## Honeypot demo test
-
-OpenCanary runs with Docker Compose and writes JSON lines to `logs\opencanary.log`. For a safe local demo, start Docker Desktop and OpenCanary, then test the local SSH honeypot port on your own machine:
+Bu demo yalnızca kendi lokal makinenizdeki OpenCanary honeypot için yapılmalıdır.
 
 ```powershell
 ssh fakeadmin@127.0.0.1 -p 2222
 ```
 
-On Windows, this port check is also safe:
+Windows port kontrolü:
 
 ```powershell
 Test-NetConnection 127.0.0.1 -Port 2222
 ```
 
-Then ingest and analyze the event:
+Sonra:
 
 ```powershell
 cd GuardianNet\GuardianNet
 python manage.py run_monitoring_cycle --scan-limit 10
 ```
 
-Check the dashboard for the honeypot event and the updated risk score.
+Dashboard'da honeypot event, "SSH bağlantı denemesi algılandı" uyarısı ve risk skoru kontrol edilir.
 
-## Safety notes
-
-- `.env` is not committed.
-- `logs/opencanary.log` is not committed.
-- `logs/monitoring_cycle_task.log` is not committed.
-- `LOCAL_SUBNET` comes from `.env` or runtime settings.
-- OpenCanary runs with Docker.
-- Real mode does not generate demo or fallback data.
-- Do not scan public IPs, school networks, or any system where you do not have explicit permission.
-
-## Test
+## Tests
 
 ```powershell
+cd GuardianNet\GuardianNet
+python manage.py makemigrations --check --dry-run
 python manage.py check
 python manage.py test
-python manage.py makemigrations
-python manage.py migrate
-python manage.py run_network_scan
-python manage.py ingest_honeypot_logs
-python manage.py analyze_security
-python manage.py check_runtime_health
 python manage.py run_monitoring_cycle --scan-limit 10
 ```
 
-Bu sistem yalnızca kullanıcının kendi yerel ağı veya açıkça izin verilmiş test ağlarında kullanılmalıdır.
+## Safety Notes
+
+- Yalnızca izinli lokal ortamda kullanın.
+- Kamu IP'leri, okul ağı veya izinsiz sistemlerde tarama/saldırı yapmayın.
+- `.env` commitlenmez.
+- `logs/opencanary.log` commitlenmez.
+- `logs/monitoring_cycle_task.log` commitlenmez.
+- Real mode'da demo/fallback veri üretilmez.
+- GuardianNet saldırı üretmez; yalnızca izinli kaynaklardan gelen gözlem ve logları analiz eder.
+
+## Limitations / Future Work
+
+- ARP spoofing analizi mevcut IP/MAC gözlemlerine bağlıdır; MAC bilgisi yoksa güvenilir ARP analizi yapılamaz.
+- Risk puanı açıklanabilir basit kurallarla hesaplanır; üretim SIEM korelasyonu değildir.
+- OpenCanary HTTP/FTP servisleri yapılandırılmıştır; demo odağı SSH honeypot üzerindedir.
+- Daha geniş kurumsal kullanım için merkezi log saklama, rol tabanlı yetki ve gelişmiş raporlama eklenebilir.

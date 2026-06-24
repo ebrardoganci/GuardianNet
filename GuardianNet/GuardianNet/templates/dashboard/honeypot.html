@@ -1,1 +1,62 @@
-{% extends 'base.html' %}{% block title %}Honeypot | GuardianNet{% endblock %}{% block content %}<h1>Honeypot</h1><div class="stats"><article><span>Çalışma Modu</span><strong>{{ honeypot_status.label }}</strong></article>{% for service, state in honeypot_status.services.items %}<article><span>{{ service|upper }}</span><strong>{{ state|title }}</strong><small>Sadece tespit/log analizi</small></article>{% endfor %}</div><section class="panel"><h2>Honeypot Olayları</h2><div class="table-wrap"><table><thead><tr><th>Kaynak IP</th><th>Servis</th><th>Hedef Port</th><th>Kullanıcı</th><th>İstek / Komut Kaydı</th><th>Zaman</th></tr></thead><tbody>{% for item in events %}<tr><td>{{ item.source_ip }}</td><td>{{ item.get_service_display }}</td><td>{{ item.destination_port|default:'-' }}</td><td>{{ item.username|default:'-' }}</td><td>{{ item.command|default:'-' }}</td><td>{{ item.created_at|date:'d.m.Y H:i' }}</td></tr>{% empty %}<tr><td colspan="6">{{ honeypot_empty_message }}</td></tr>{% endfor %}</tbody></table></div></section>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}Honeypot | GuardianNet{% endblock %}
+{% block content %}
+<h1>Honeypot</h1>
+<p>OpenCanary sahte servislerine gelen erişim denemeleri.</p>
+
+<div class="stats">
+  <article>
+    <span>Çalışma Modu</span>
+    <strong>{{ honeypot_status.label }}</strong>
+  </article>
+  {% for service, state in honeypot_status.services.items %}
+  <article>
+    <span>{{ service|upper }}</span>
+    <strong>{{ state|title }}</strong>
+    <small>Sadece tespit/log analizi</small>
+  </article>
+  {% endfor %}
+</div>
+
+<section class="panel">
+  <h2>Honeypot Olayları</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Olay</th>
+          <th>Kaynak IP</th>
+          <th>Servis</th>
+          <th>Hedef Port</th>
+          <th>Kullanıcı</th>
+          <th>İstek / Komut Kaydı</th>
+          <th>Zaman</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in events %}
+        <tr>
+          <td>
+            {% if item.service == "ssh" %}
+            <span class="badge severity-warning">SSH bağlantı denemesi algılandı</span>
+            {% else %}
+            <span class="badge severity-info">{{ item.get_service_display }} erişim denemesi</span>
+            {% endif %}
+          </td>
+          <td>{{ item.source_ip }}</td>
+          <td>{{ item.get_service_display }}</td>
+          <td>{{ item.destination_port|default:"-" }}</td>
+          <td>{{ item.username|default:"-" }}</td>
+          <td>{{ item.command|default:"Yeni bağlantı denemesi" }}</td>
+          <td>{{ item.created_at|date:"d.m.Y H:i" }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="7">{{ honeypot_empty_message }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

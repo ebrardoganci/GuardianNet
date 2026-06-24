@@ -1,1 +1,69 @@
-{% extends 'base.html' %}{% block title %}Raporlar | GuardianNet{% endblock %}{% block content %}<h1>Raporlar</h1><p>Son gözlemlerin görsel özeti.</p><div class="grid-3"><section class="panel"><h2>Günlük Olay</h2><div class="chart-box"><canvas id="daily-chart"></canvas></div></section><section class="panel"><h2>Olay Türleri</h2><div class="chart-box"><canvas id="type-chart"></canvas></div></section><section class="panel"><h2>Risk Puanı</h2><div class="chart-box"><canvas id="risk-chart"></canvas></div></section></div>{{ daily_chart|json_script:'daily-chart-data' }}{{ type_chart|json_script:'type-chart-data' }}{{ risk_chart|json_script:'risk-chart-data' }}<section class="panel"><h2>En Riskli Cihazlar</h2><div class="table-wrap"><table><thead><tr><th>IP</th><th>Hostname</th><th>Durum</th><th>Güven</th><th>Risk</th></tr></thead><tbody>{% for item in risky_devices %}<tr><td>{{ item.ip_address }}</td><td>{{ item.hostname|default:'-' }}</td><td>{{ item.get_status_display }}</td><td>{{ item.is_trusted|yesno:'Güvenilir,Güvenilmeyen' }}</td><td>{{ item.risk_score }}</td></tr>{% empty %}<tr><td colspan="5">Cihaz yok.</td></tr>{% endfor %}</tbody></table></div></section>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}Raporlar | GuardianNet{% endblock %}
+{% block content %}
+<h1>Raporlar</h1>
+<p>Honeypot, cihaz ve risk kayıtlarının grafiksel özeti.</p>
+
+{% if has_report_data %}
+<div class="grid-2">
+  <section class="panel">
+    <h2>Günlük Honeypot / Güvenlik Olayı</h2>
+    <div class="chart-box"><canvas id="daily-chart"></canvas></div>
+  </section>
+  <section class="panel">
+    <h2>Risk Skoru Geçmişi</h2>
+    <div class="chart-box"><canvas id="risk-chart"></canvas></div>
+  </section>
+</div>
+<div class="grid-2">
+  <section class="panel">
+    <h2>Cihaz Durumu</h2>
+    <div class="chart-box"><canvas id="device-report-chart"></canvas></div>
+  </section>
+  <section class="panel">
+    <h2>Honeypot Servis Dağılımı</h2>
+    <div class="chart-box"><canvas id="service-chart"></canvas></div>
+  </section>
+</div>
+{{ daily_chart|json_script:"daily-chart-data" }}
+{{ risk_chart|json_script:"risk-chart-data" }}
+{{ device_report_chart|json_script:"device-report-chart-data" }}
+{{ service_chart|json_script:"service-chart-data" }}
+{% else %}
+<section class="panel">
+  <p>Henüz raporlanacak veri yok.</p>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>En Riskli Cihazlar</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>IP</th>
+          <th>Hostname</th>
+          <th>Durum</th>
+          <th>Güven</th>
+          <th>Risk</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in risky_devices %}
+        <tr>
+          <td>{{ item.ip_address }}</td>
+          <td>{{ item.hostname|default:"-" }}</td>
+          <td>{{ item.get_status_display }}</td>
+          <td>{{ item.is_trusted|yesno:"Güvenilir,Güvenilmeyen" }}</td>
+          <td>{{ item.risk_score }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="5">Cihaz yok.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

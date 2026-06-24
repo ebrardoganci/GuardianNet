@@ -71,27 +71,27 @@
   {% if latest_monitoring_cycle %}
   <div class="stats">
     <article>
-      <span>Started time</span>
+      <span>Başlangıç zamanı</span>
       <strong>{{ latest_monitoring_cycle.started_at|date:"d.m.Y H:i" }}</strong>
       <small>{{ latest_monitoring_cycle.get_status_display }}</small>
     </article>
     <article>
-      <span>Finished time</span>
+      <span>Bitiş zamanı</span>
       <strong>{% if latest_monitoring_cycle.completed_at %}{{ latest_monitoring_cycle.completed_at|date:"d.m.Y H:i" }}{% else %}-{% endif %}</strong>
-      <small>Cycle status</small>
+      <small>Monitoring cycle durumu</small>
     </article>
     <article>
-      <span>Scan found/new</span>
+      <span>Scan bulunan/yeni</span>
       <strong>{{ latest_monitoring_cycle.scan_found_devices }} / {{ latest_monitoring_cycle.scan_new_devices }}</strong>
       <small>{{ latest_monitoring_cycle.get_scan_status_display }}</small>
     </article>
     <article>
-      <span>Honeypot read/created</span>
+      <span>Honeypot okunan/eklenen</span>
       <strong>{{ latest_monitoring_cycle.honeypot_read_lines }} / {{ latest_monitoring_cycle.honeypot_created_events }}</strong>
       <small>{{ latest_monitoring_cycle.honeypot_duplicates }} duplicate · {{ latest_monitoring_cycle.honeypot_ignored_lines }} ignored · {{ latest_monitoring_cycle.honeypot_parse_errors }} parse</small>
     </article>
     <article>
-      <span>Risk score</span>
+      <span>Risk puanı</span>
       <strong>{{ latest_monitoring_cycle.risk_score }}</strong>
       <small>ARP {{ latest_monitoring_cycle.arp_alerts }} · Port {{ latest_monitoring_cycle.port_alerts }} · SSH {{ latest_monitoring_cycle.ssh_alerts }}</small>
     </article>
@@ -165,7 +165,7 @@
 
 <div class="grid-2">
   <section class="panel">
-    <h2>Son Güvenlik Olayları</h2>
+    <h2>Son Saldırı / Güvenlik Olayları</h2>
     <div class="table-wrap">
       <table>
         <thead>

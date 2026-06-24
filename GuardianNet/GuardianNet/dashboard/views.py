@@ -281,19 +281,33 @@ def security_events(request):
 
 @login_required
 def reports(request):
-    devices_qs, _, events_qs, _ = _data_sources()
+    devices_qs, _, events_qs, honeypot_qs = _data_sources()
     since = timezone.now() - timedelta(days=7)
-    daily = list(events_qs.filter(created_at__gte=since).annotate(day=TruncDate("created_at")).values("day").annotate(total=Count("id")).order_by("day"))
-    by_type = list(events_qs.values("event_type").annotate(total=Count("id")).order_by("event_type"))
+    daily_counts = {}
+    for row in events_qs.filter(created_at__gte=since).annotate(day=TruncDate("created_at")).values("day").annotate(total=Count("id")):
+        daily_counts[row["day"]] = daily_counts.get(row["day"], 0) + row["total"]
+    for row in honeypot_qs.filter(created_at__gte=since).annotate(day=TruncDate("created_at")).values("day").annotate(total=Count("id")):
+        daily_counts[row["day"]] = daily_counts.get(row["day"], 0) + row["total"]
+    daily = [{"day": day, "total": total} for day, total in sorted(daily_counts.items())]
+    service_rows = list(honeypot_qs.values("service").annotate(total=Count("id")).order_by("service"))
     snapshot_qs = RiskSnapshot.objects.order_by("recorded_at")
     if is_real_mode():
         snapshot_qs = real_risk_snapshots(snapshot_qs)
     snapshots = list(snapshot_qs)
+    online = devices_qs.filter(status="online").count()
+    offline = devices_qs.filter(status="offline").count()
+    untrusted = devices_qs.filter(is_trusted=False).count()
+    activity_chart = {"labels": [row["day"].isoformat() for row in daily], "values": [row["total"] for row in daily]}
+    risk_chart = {"labels": [item.recorded_at.strftime("%d.%m") for item in snapshots], "values": [item.risk_score for item in snapshots]}
+    device_report_chart = {"labels": ["Online", "Offline", "Bilinmeyen"], "values": [online, offline, untrusted]}
+    service_chart = {"labels": [row["service"].upper() for row in service_rows], "values": [row["total"] for row in service_rows]}
     context = {
         "risky_devices": devices_qs.order_by("-risk_score")[:10],
-        "daily_chart": {"labels": [row["day"].isoformat() for row in daily], "values": [row["total"] for row in daily]},
-        "type_chart": {"labels": [row["event_type"] for row in by_type], "values": [row["total"] for row in by_type]},
-        "risk_chart": {"labels": [item.recorded_at.strftime("%d.%m") for item in snapshots], "values": [item.risk_score for item in snapshots]},
+        "daily_chart": activity_chart,
+        "risk_chart": risk_chart,
+        "device_report_chart": device_report_chart,
+        "service_chart": service_chart,
+        "has_report_data": any(activity_chart["values"] + risk_chart["values"] + device_report_chart["values"] + service_chart["values"]),
     }
     return render(request, "dashboard/reports.html", context)
 

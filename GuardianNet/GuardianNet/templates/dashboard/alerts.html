@@ -3,25 +3,97 @@
 {% block content %}
 <h1>Uyarılar</h1>
 <p>Savunma amaçlı tespit ve inceleme kayıtları.</p>
+
 <section class="panel">
   <form method="get">
     <label>Durum
-      <select name="status">{% for key, label in status_filters.items %}<option value="{{ key }}" {% if active_status_filter == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+      <select name="status">
+        {% for key, label in status_filters.items %}
+        <option value="{{ key }}" {% if active_status_filter == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
     </label>
     <label>Seviye
-      <select name="severity"><option value="all" {% if active_severity_filter == 'all' %}selected{% endif %}>Tümü</option>{% for key, label in severity_filters %}<option value="{{ key }}" {% if active_severity_filter == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+      <select name="severity">
+        <option value="all" {% if active_severity_filter == 'all' %}selected{% endif %}>Tümü</option>
+        {% for key, label in severity_filters %}
+        <option value="{{ key }}" {% if active_severity_filter == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
     </label>
     <label>Tip
-      <select name="type"><option value="all" {% if active_type_filter == 'all' %}selected{% endif %}>Tümü</option>{% for key, label in type_filters %}<option value="{{ key }}" {% if active_type_filter == key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+      <select name="type">
+        <option value="all" {% if active_type_filter == 'all' %}selected{% endif %}>Tümü</option>
+        {% for key, label in type_filters %}
+        <option value="{{ key }}" {% if active_type_filter == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
     </label>
     <button type="submit">Filtrele</button>
   </form>
 </section>
+
 <section class="panel">
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Başlık</th><th>Açıklama</th><th>Tip</th><th>Seviye</th><th>Durum</th><th>Kaynak</th><th>Cihaz</th><th>Oluşturulma</th><th>Güncellenme</th><th>Aksiyon</th></tr></thead>
-      <tbody>{% for item in alerts %}<tr><td>{{ item.title }}</td><td>{{ item.message }}</td><td>{{ item.get_alert_type_display }}</td><td><span class="badge severity-{{ item.severity }}">{{ item.get_severity_display }}</span></td><td>{{ item.get_status_display }}</td><td>{{ item.source_ip|default:'-' }}<br>{{ item.source_mac|default:'-' }}</td><td>{% if item.device %}<a href="{% url 'dashboard:device_detail' item.device.pk %}">{{ item.device.ip_address }}</a>{% else %}-{% endif %}</td><td>{{ item.created_at|date:'d.m.Y H:i' }}</td><td>{{ item.updated_at|date:'d.m.Y H:i' }}</td><td><form method="post" action="{% url 'dashboard:update_alert_status' item.pk %}">{% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}"><button name="status" value="acknowledged" type="submit">İncelendi</button><button name="status" value="resolved" type="submit">Çözüldü</button><button name="status" value="active" type="submit">Aktif yap</button></form></td></tr>{% empty %}<tr><td colspan="10">Uyarı kaydı yok.</td></tr>{% endfor %}</tbody>
+      <thead>
+        <tr>
+          <th>Kullanıcı Özeti</th>
+          <th>Başlık</th>
+          <th>Açıklama</th>
+          <th>Tip</th>
+          <th>Seviye</th>
+          <th>Durum</th>
+          <th>Kaynak</th>
+          <th>Hedef / Servis</th>
+          <th>Cihaz</th>
+          <th>Oluşturulma</th>
+          <th>Aksiyon</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in alerts %}
+        <tr>
+          <td>
+            {% if item.alert_type == "new_device" %}
+            Yeni/bilinmeyen cihaz ağa bağlandı
+            {% elif item.alert_type == "honeypot" %}
+            SSH bağlantı denemesi algılandı
+            {% elif item.alert_type == "brute_force" %}
+            Olası SSH brute force denemesi
+            {% elif item.alert_type == "port_scan" %}
+            Olası port tarama davranışı
+            {% elif item.alert_type == "arp_spoof" %}
+            Olası ARP spoofing şüphesi
+            {% else %}
+            {{ item.get_alert_type_display }}
+            {% endif %}
+          </td>
+          <td>{{ item.title }}</td>
+          <td>{{ item.message }}</td>
+          <td>{{ item.get_alert_type_display }}</td>
+          <td><span class="badge severity-{{ item.severity }}">{{ item.get_severity_display }}</span></td>
+          <td>{{ item.get_status_display }}</td>
+          <td>{{ item.source_ip|default:"-" }}<br>{{ item.source_mac|default:"-" }}</td>
+          <td>{% if item.alert_type == "honeypot" or item.alert_type == "brute_force" %}SSH honeypot{% elif item.alert_type == "port_scan" %}Birden fazla port/servis{% else %}-{% endif %}</td>
+          <td>{% if item.device %}<a href="{% url 'dashboard:device_detail' item.device.pk %}">{{ item.device.ip_address }}</a>{% else %}-{% endif %}</td>
+          <td>{{ item.created_at|date:"d.m.Y H:i" }}</td>
+          <td>
+            <form method="post" action="{% url 'dashboard:update_alert_status' item.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="next" value="{{ request.get_full_path }}">
+              <button name="status" value="acknowledged" type="submit">İncelendi</button>
+              <button name="status" value="resolved" type="submit">Çözüldü</button>
+              <button name="status" value="active" type="submit">Aktif yap</button>
+            </form>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="11">Henüz olay yok. Sistem normal görünüyor.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
     </table>
   </div>
 </section>
