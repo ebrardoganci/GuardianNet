@@ -187,6 +187,15 @@ class DashboardMVPTests(TestCase):
             raw_summary={"honeypot": {"ignored": 8}},
         )
         MonitoringCycleRun.objects.filter(pk=run.pk).update(started_at=started_at)
+        HoneypotEvent.objects.create(
+            source_ip="192.168.50.40",
+            service="ssh",
+            username="adminuser",
+            command="login attempt",
+            destination_port=2222,
+            raw_data={"logtype": 4002},
+            is_mock=False,
+        )
 
         response = self.client.get(reverse("dashboard:index"))
 
@@ -196,6 +205,12 @@ class DashboardMVPTests(TestCase):
         self.assertContains(response, "1 duplicate")
         self.assertContains(response, "8 ignored")
         self.assertContains(response, "Risk score")
+        self.assertContains(response, "Son Honeypot Olayları")
+        self.assertContains(response, "SSH bağlantı denemesi algılandı")
+        self.assertContains(response, "Honeypot")
+        self.assertContains(response, "Yeni bağlantı denemesi")
+        self.assertContains(response, "192.168.50.40")
+        self.assertContains(response, "2222")
         content = response.content.decode()
         self.assertNotIn("{{", content)
         self.assertNotIn("latest_monitoring_cycle.started_at", content)

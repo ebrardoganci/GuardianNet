@@ -30,6 +30,13 @@
   </div>
 </div>
 
+{% if has_recent_ssh_honeypot_event %}
+<section class="message">
+  <strong>SSH bağlantı denemesi algılandı.</strong>
+  Honeypot servisine erişim denemesi kaydedildi.
+</section>
+{% endif %}
+
 <div class="stats">
   <article>
     <span>Online Cihaz</span><strong>{{ online_devices }}</strong
@@ -94,6 +101,53 @@
   {% endif %} {% else %}
   <p>Henüz monitoring cycle çalışmadı.</p>
   {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Son Honeypot Olayları</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Servis</th>
+          <th>Kaynak IP</th>
+          <th>Hedef Port</th>
+          <th>Özet</th>
+          <th>Zaman</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for event in recent_honeypot_events %}
+        <tr>
+          <td>
+            <span class="badge {% if event.service == 'ssh' %}severity-warning{% else %}severity-info{% endif %}">{{ event.get_service_display }}</span>
+            <span class="badge">Honeypot</span>
+            {% if event.service == "ssh" %}<span class="badge severity-warning">Yeni bağlantı denemesi</span>{% endif %}
+          </td>
+          <td>{{ event.source_ip }}</td>
+          <td>{{ event.destination_port|default:"-" }}</td>
+          <td>
+            {% if event.service == "ssh" %}
+            <strong>SSH bağlantı denemesi algılandı</strong>
+            {% if event.command %} · {{ event.command }}{% elif event.raw_data.logtype %} · Log type: {{ event.raw_data.logtype }}{% endif %}
+            {% elif event.command %}
+            {{ event.command }}
+            {% elif event.raw_data.logtype %}
+            Log type: {{ event.raw_data.logtype }}
+            {% else %}
+            Yeni bağlantı denemesi
+            {% endif %}
+          </td>
+          <td>{{ event.created_at|date:"d.m H:i" }}</td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="5">Henüz honeypot olayı yok.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 
 <div class="grid-2">

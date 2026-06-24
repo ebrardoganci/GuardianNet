@@ -137,12 +137,14 @@ def index(request):
     mode = get_value("guardiannet_mode", "real")
     if mode == "demo" and not Device.objects.exists():
         scan_network(force_demo=True)
-    devices_qs, alerts_qs, events_qs, _ = _data_sources()
+    devices_qs, alerts_qs, events_qs, honeypot_qs = _data_sources()
     online = devices_qs.filter(status="online").count()
     offline = devices_qs.filter(status="offline").count()
     unknown = devices_qs.filter(status="unknown").count()
     latest_scan = _latest_real_scan()
     latest_cycle = MonitoringCycleRun.objects.first()
+    recent_honeypot_events = list(honeypot_qs[:5])
+    has_recent_ssh_honeypot_event = any(event.service == "ssh" for event in recent_honeypot_events)
     active_alerts_count = (
         real_alerts(Alert.objects.filter(status="active")).count()
         if is_real_mode()
@@ -154,6 +156,8 @@ def index(request):
         "last_scan_found_devices": latest_scan.devices_found if latest_scan else None,
         "active_alerts": active_alerts_count,
         "recent_events": events_qs[:6], "recent_alerts": alerts_qs[:6],
+        "recent_honeypot_events": recent_honeypot_events,
+        "has_recent_ssh_honeypot_event": has_recent_ssh_honeypot_event,
         "honeypot_status": get_honeypot_status(),
         "latest_monitoring_cycle": latest_cycle,
         "monitoring_scan_limit_default": _monitoring_scan_limit_default(),
