@@ -7,7 +7,7 @@
     <h2>Çalışma Ayarları</h2>
     <form method="post">{% csrf_token %}
       <label>Çalışma modu
-        <select name="guardiannet_mode"><option value="real" {% if guardiannet_mode == 'real' %}selected{% endif %}>Real</option><option value="demo" {% if guardiannet_mode == 'demo' %}selected{% endif %}>Demo / Mock</option></select>
+        <input value="Real" disabled>
       </label>
       <label>İzinli yerel subnet (boşsa otomatik, otomatik ağ /24 ile sınırlıdır)<input name="local_subnet" value="{{ local_subnet }}" placeholder="192.168.1.0/24"></label>
       <label>Tarama aralığı (saniye)<input type="number" min="30" name="scan_interval_seconds" value="{{ scan_interval_seconds }}"></label>
@@ -24,9 +24,26 @@
     <p>Honeypot: <strong>{{ honeypot_status.label }}</strong></p>
     <p>Log yolu: <strong>{{ honeypot_status.log_path }}</strong></p>
     <p>Son network scan: <strong>{% if last_scan %}{{ last_scan.started_at|date:'d.m.Y H:i' }} ({{ last_scan.get_status_display }}){% else %}Henüz çalışmadı{% endif %}</strong></p>
+    <p>Son analiz: <strong>{% if last_analysis %}{{ last_analysis.recorded_at|date:'d.m.Y H:i' }}{% else %}Henüz çalışmadı{% endif %}</strong></p>
     <p>Son honeypot ingest: <strong>{{ last_ingest }}</strong></p>
+    {% if subnet_warning %}
+    <p><strong>Uyarı:</strong> Bu subnet aralığı küçük olabilir. Çok dar subnet seçilirse bazı cihazlar tarama dışında kalabilir.</p>
+    {% endif %}
   </section>
 </div>
+<section class="panel">
+  <h2>Veri Yönetimi</h2>
+  <p>Bu işlemler yalnızca GuardianNet güvenlik verilerini temizler. Kullanıcılar, admin tabloları, session kayıtları ve migration tabloları silinmez.</p>
+  <div class="grid-3">
+    {% for key, value in clear_targets.items %}
+    <form method="post" action="{% url 'dashboard:clear_security_data' %}" onsubmit="return confirm('{{ value.0 }} silinsin mi? Bu işlem geri alınamaz.');">
+      {% csrf_token %}
+      <input type="hidden" name="target" value="{{ key }}">
+      <button type="submit">{{ value.0 }}</button>
+    </form>
+    {% endfor %}
+  </div>
+</section>
 <section class="panel">
   <h2>Sistem Sağlığı</h2>
   <div class="table-wrap">

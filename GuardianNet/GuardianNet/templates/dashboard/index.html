@@ -7,6 +7,10 @@
     <p>
       Son güncelleme: {% now "d.m.Y H:i:s" %} · Sayfa 60 saniyede bir yenilenir.
     </p>
+    <p>
+      Son tarama: {% if latest_scan %}{{ latest_scan.started_at|date:"d.m.Y H:i" }}{% else %}Henüz yok{% endif %}
+      · Son analiz: {% if latest_analysis %}{{ latest_analysis.recorded_at|date:"d.m.Y H:i" }}{% else %}Henüz yok{% endif %}
+    </p>
   </div>
   <div>
     <form method="post" action="{% url 'dashboard:run_monitoring_cycle' %}">
@@ -47,6 +51,10 @@
     ><small>Kullanılan subnet içinde</small>
   </article>
   <article>
+    <span>Eksik Bilgili Cihaz</span><strong>{{ partial_devices }}</strong
+    ><small>IP görüldü, kimlik bilgisi eksik</small>
+  </article>
+  <article>
     <span>Son Taramada Bulunan</span
     ><strong>{{ last_scan_found_devices|default:'-' }}</strong
     ><small>{% if latest_monitoring_cycle %}Cycle {{ latest_monitoring_cycle.started_at|date:"d.m H:i" }}{% else %}Henüz cycle yok{% endif %}</small>
@@ -65,6 +73,59 @@
     ><small>SSH · HTTP · FTP</small>
   </article>
 </div>
+
+<section class="panel">
+  <h2>Ağ Taraması Nedir?</h2>
+  <p>
+    GuardianNet, Nmap'i ağdaki cihazları ve belirli açık portları bulmak için kullanır.
+    Port, cihazdaki bir servis kapısı gibi düşünülebilir: web paneli, dosya paylaşımı
+    veya uzaktan yönetim gibi servisler bu kapılardan cevap verir.
+  </p>
+  <p>
+    Açık port tek başına saldırı değildir. Ancak gereksiz açık portlar, özellikle zayıf
+    parola veya yanlış yapılandırma varsa, risk oluşturabilir. Bu yüzden port taraması
+    hangi servislerin erişilebilir olduğunu sade şekilde göstermek için yapılır.
+  </p>
+</section>
+
+<section class="panel">
+  <h2>Kullanılan Veri Kaynakları</h2>
+  <p>GuardianNet uyarıları demo veriden değil; gerçek ağ taraması, OpenPort kayıtları, honeypot logları, ARP gözlemleri ve ham bağlantı olaylarının analizinden üretir.</p>
+</section>
+
+<section class="panel">
+  <h2>Risk Skoru Neden Yükseldi?</h2>
+  {% if risk_reasons %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Neden</th>
+          <th>Adet</th>
+          <th>Etkisi</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in risk_reasons %}
+        <tr>
+          <td>{{ item.label }}</td>
+          <td>{{ item.count }}</td>
+          <td>+{{ item.points }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p>Ne yapmalıyım?</p>
+  <ul>
+    {% for action in risk_actions %}
+    <li>{{ action }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>Risk skorunu artıran aktif bir bulgu yok.</p>
+  {% endif %}
+</section>
 
 <section class="panel">
   <h2>Son Monitoring Cycle</h2>
@@ -91,9 +152,9 @@
       <small>{{ latest_monitoring_cycle.honeypot_duplicates }} duplicate · {{ latest_monitoring_cycle.honeypot_ignored_lines }} ignored · {{ latest_monitoring_cycle.honeypot_parse_errors }} parse</small>
     </article>
     <article>
-      <span>Risk puanı</span>
+      <span>Son cycle analiz skoru</span>
       <strong>{{ latest_monitoring_cycle.risk_score }}</strong>
-      <small>ARP {{ latest_monitoring_cycle.arp_alerts }} · Port {{ latest_monitoring_cycle.port_alerts }} · SSH {{ latest_monitoring_cycle.ssh_alerts }}</small>
+      <small>Güncel toplam risk üstteki Risk Seviyesi kartındadır. ARP {{ latest_monitoring_cycle.arp_alerts }} · Port {{ latest_monitoring_cycle.port_alerts }} · SSH {{ latest_monitoring_cycle.ssh_alerts }}</small>
     </article>
   </div>
   {% if latest_monitoring_cycle.error_summary %}

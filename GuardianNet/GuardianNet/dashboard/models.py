@@ -3,7 +3,12 @@ from django.db import models
 
 
 class Device(models.Model):
-    STATUS_CHOICES = [("online", "Online"), ("offline", "Offline"), ("unknown", "Bilinmiyor")]
+    STATUS_CHOICES = [
+        ("online", "Online"),
+        ("offline", "Offline"),
+        ("partial", "Kısmen algılandı"),
+        ("unknown", "Bilinmiyor"),
+    ]
 
     ip_address = models.GenericIPAddressField("IP adresi", unique=True)
     mac_address = models.CharField("MAC adresi", max_length=50, blank=True, null=True)
@@ -31,7 +36,10 @@ class Alert(models.Model):
     ALERT_TYPE_CHOICES = [
         ("new_device", "Yeni Cihaz"), ("port_scan", "Port Tarama Tespiti"),
         ("arp_spoof", "ARP Anomali Tespiti"), ("brute_force", "Kaba Kuvvet Tespiti"),
-        ("suspicious_traffic", "Supheli Trafik"), ("honeypot", "Honeypot"), ("system", "Sistem"),
+        ("dos_suspected", "DoS Şüphesi"), ("ssh_port_open", "SSH Portu Açık"),
+        ("telnet_port_open", "Telnet Portu Açık"), ("database_port_open", "Veritabanı Portu Açık"),
+        ("risky_port", "Riskli Port"), ("suspicious_traffic", "Supheli Trafik"),
+        ("honeypot", "Honeypot"), ("system", "Sistem"),
     ]
     STATUS_CHOICES = [("active", "Aktif"), ("acknowledged", "Incelendi"), ("resolved", "Cozuldu")]
 
@@ -63,6 +71,7 @@ class SecurityEvent(models.Model):
     EVENT_TYPE_CHOICES = [
         ("network", "Ag Olayi"), ("port_scan", "Port Tarama Tespiti"),
         ("arp_anomaly", "ARP Anomalisi"), ("brute_force", "Kaba Kuvvet Tespiti"),
+        ("dos_suspected", "DoS Şüphesi"), ("open_port", "Açık Port"),
         ("honeypot", "Honeypot"), ("system", "Sistem"),
     ]
 
@@ -87,6 +96,26 @@ class SecurityEvent(models.Model):
         return f"{self.title} - {self.get_level_display()}"
 
 
+class OpenPort(models.Model):
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name="open_ports")
+    port = models.PositiveIntegerField("Port")
+    protocol = models.CharField("Protokol", max_length=20, default="tcp")
+    service_name = models.CharField("Servis", max_length=80, blank=True)
+    source = models.CharField("Kaynak", max_length=80, blank=True)
+    first_seen = models.DateTimeField("İlk görülme", auto_now_add=True)
+    last_seen = models.DateTimeField("Son görülme", auto_now=True)
+
+    class Meta:
+        ordering = ["device__ip_address", "port"]
+        constraints = [
+            models.UniqueConstraint(fields=["device", "port", "protocol"], name="unique_open_port_per_device")
+        ]
+
+    def __str__(self):
+        service = f" {self.service_name}" if self.service_name else ""
+        return f"{self.device.ip_address}:{self.port}/{self.protocol}{service}"
+
+
 class NetworkScan(models.Model):
     STATUS_CHOICES = [("demo", "Demo"), ("completed", "Tamamlandi"), ("failed", "Basarisiz")]
 
@@ -108,14 +137,19 @@ class NetworkScan(models.Model):
 
 
 class HoneypotEvent(models.Model):
-    SERVICE_CHOICES = [("ssh", "SSH"), ("http", "HTTP"), ("ftp", "FTP")]
+    SERVICE_CHOICES = [("ssh", "SSH"), ("http", "HTTP"), ("ftp", "FTP"), ("telnet", "Telnet")]
+    EVENT_TYPE_CHOICES = [("connection", "Bağlantı"), ("auth_failure", "Başarısız giriş"), ("request", "İstek")]
 
     event_id = models.CharField("Log kimligi", max_length=64, unique=True, blank=True, null=True)
     source_ip = models.GenericIPAddressField("Kaynak IP")
+    source_port = models.PositiveIntegerField("Kaynak port", blank=True, null=True)
     service = models.CharField("Servis", max_length=20, choices=SERVICE_CHOICES)
+    event_type = models.CharField("Olay tipi", max_length=30, choices=EVENT_TYPE_CHOICES, default="connection")
     username = models.CharField("Kullanici adi", max_length=100, blank=True)
     command = models.CharField("Kaydedilen istek/komut", max_length=255, blank=True)
     destination_port = models.PositiveIntegerField("Hedef port", blank=True, null=True)
+    protocol = models.CharField("Protokol", max_length=20, default="tcp", blank=True)
+    source_type = models.CharField("Kaynak veri turu", max_length=80, default="OpenCanary logu", blank=True)
     login_success = models.BooleanField("Giris basarili", default=False)
     raw_data = models.JSONField("Ham log", default=dict, blank=True)
     is_mock = models.BooleanField("Mock veri", default=True)
@@ -126,6 +160,20 @@ class HoneypotEvent(models.Model):
 
     def __str__(self):
         return f"{self.source_ip} - {self.service}"
+
+
+class ArpObservation(models.Model):
+    ip_address = models.GenericIPAddressField("IP adresi")
+    mac_address = models.CharField("MAC adresi", max_length=50)
+    source = models.CharField("Kaynak", max_length=80, default="ARP gözlemi", blank=True)
+    is_gateway = models.BooleanField("Gateway", default=False)
+    observed_at = models.DateTimeField("Gözlem zamanı", auto_now_add=True)
+
+    class Meta:
+        ordering = ["-observed_at"]
+
+    def __str__(self):
+        return f"{self.ip_address} - {self.mac_address}"
 
 
 class SystemSetting(models.Model):

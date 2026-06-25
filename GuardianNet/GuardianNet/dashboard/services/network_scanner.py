@@ -1,4 +1,5 @@
 import ipaddress
+import re
 import shutil
 import socket
 import subprocess
@@ -6,18 +7,13 @@ import xml.etree.ElementTree as ET
 from itertools import islice
 
 from django.conf import settings
-from django.db.models import Q
 from django.utils import timezone
 
-from dashboard.models import Alert, Device, NetworkScan, SecurityEvent
+from dashboard.models import ArpObservation, Device, NetworkScan, OpenPort, SecurityEvent
+from dashboard.security_explanations import PORT_SCAN_PORTS
 from dashboard.services.runtime_settings import get_bool, get_value
 
 
-DEMO_DEVICES = [
-    {"ip_address": "192.0.2.10", "mac_address": "02:00:00:00:00:10", "hostname": "demo-router", "vendor": "Demo Networks", "status": "online", "is_trusted": True, "risk_score": 10},
-    {"ip_address": "192.0.2.21", "mac_address": "02:00:00:00:00:21", "hostname": "lab-workstation", "vendor": "Example Labs", "status": "online", "is_trusted": True, "risk_score": 28},
-    {"ip_address": "192.0.2.45", "mac_address": "02:00:00:00:00:45", "hostname": "unknown-client", "vendor": "Bilinmiyor", "status": "offline", "is_trusted": False, "risk_score": 72},
-]
 ALLOWED_PRIVATE_NETWORKS = tuple(ipaddress.ip_network(item) for item in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
 
 
@@ -179,6 +175,110 @@ def _scan_with_nmap(targets):
     return devices, "nmap-ping"
 
 
+def _scan_with_nmap_ports(targets):
+    executable = shutil.which("nmap")
+    if not executable:
+        raise RuntimeError("Nmap bulunamadi.")
+    ports = ",".join(str(port) for port in PORT_SCAN_PORTS)
+    result = subprocess.run(
+        [
+            executable,
+            "-n",
+            "-sT",
+            "--open",
+            "--max-retries",
+            "1",
+            "--host-timeout",
+            "20s",
+            "-p",
+            ports,
+            "-oX",
+            "-",
+            *targets,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or "Nmap port taramasi basarisiz.").strip())
+    devices = []
+    for host in ET.fromstring(result.stdout).findall("host"):
+        addresses = {item.get("addrtype"): item for item in host.findall("address")}
+        ipv4 = addresses.get("ipv4")
+        if ipv4 is None:
+            continue
+        open_ports = []
+        for port_node in host.findall("ports/port"):
+            state = port_node.find("state")
+            if state is None or state.get("state") != "open":
+                continue
+            service = port_node.find("service")
+            try:
+                port_number = int(port_node.get("portid"))
+            except (TypeError, ValueError):
+                continue
+            open_ports.append({
+                "port": port_number,
+                "protocol": port_node.get("protocol") or "tcp",
+                "service": service.get("name", "") if service is not None else "",
+                "source": "nmap-port",
+            })
+        if open_ports:
+            devices.append({
+                "ip_address": ipv4.get("addr"),
+                "mac_address": None,
+                "hostname": None,
+                "vendor": "Bilinmiyor",
+                "open_ports": open_ports,
+            })
+    return devices, "nmap-port"
+
+
+def _socket_target_hosts(targets):
+    hosts = []
+    for target in targets:
+        try:
+            network = ipaddress.ip_network(target, strict=False)
+        except ValueError:
+            hosts.append(str(target))
+            continue
+        if not _is_allowed_network(network):
+            continue
+        hosts.extend(str(host) for host in network.hosts())
+    return hosts
+
+
+def _scan_with_socket_ports(targets):
+    hosts = _socket_target_hosts(targets)
+    if not hosts:
+        raise RuntimeError("Socket fallback icin hedef host bulunamadi.")
+    devices = []
+    for host in hosts:
+        open_ports = []
+        for port in PORT_SCAN_PORTS:
+            try:
+                with socket.create_connection((host, int(port)), timeout=0.25):
+                    open_ports.append({
+                        "port": int(port),
+                        "protocol": "tcp",
+                        "service": "",
+                        "source": "socket-fallback",
+                    })
+            except OSError:
+                continue
+        if open_ports:
+            devices.append({
+                "ip_address": host,
+                "mac_address": None,
+                "hostname": None,
+                "vendor": "Bilinmiyor",
+                "open_ports": open_ports,
+            })
+    return devices, "socket-fallback"
+
+
 def _scan_with_scapy(targets):
     try:
         from scapy.all import ARP, Ether, srp
@@ -192,16 +292,140 @@ def _scan_with_scapy(targets):
     return devices, "scapy-arp"
 
 
-def _seed_demo_fallback():
-    if Device.objects.exists():
-        return
-    for data in DEMO_DEVICES:
-        Device.objects.update_or_create(ip_address=data["ip_address"], defaults=data)
+def _normalize_mac(value):
+    if not value:
+        return ""
+    return str(value).strip().replace("-", ":").lower()
+
+
+def _scan_system_arp_table():
+    executable = shutil.which("arp")
+    if not executable:
+        raise RuntimeError("ARP komutu bulunamadi.")
+    result = subprocess.run([executable, "-a"], capture_output=True, text=True, timeout=5, check=False)
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or "Sistem ARP tablosu okunamadi.").strip())
+    ip_pattern = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+    mac_pattern = re.compile(r"\b(?:[0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}\b")
+    devices = []
+    for line in result.stdout.splitlines():
+        ip_match = ip_pattern.search(line)
+        mac_match = mac_pattern.search(line)
+        if not ip_match or not mac_match:
+            continue
+        mac_address = _normalize_mac(mac_match.group(0))
+        if mac_address in {"00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff"}:
+            continue
+        devices.append({
+            "ip_address": ip_match.group(0),
+            "mac_address": mac_address,
+            "hostname": None,
+            "vendor": "Bilinmiyor",
+        })
+    return devices, "system-arp"
+
+
+def _merge_open_ports(existing, incoming):
+    seen = {(item.get("port"), item.get("protocol", "tcp")) for item in existing}
+    for item in incoming or []:
+        key = (item.get("port"), item.get("protocol", "tcp"))
+        if item.get("port") and key not in seen:
+            existing.append(item)
+            seen.add(key)
+
+
+def _merge_discovered_records(collections):
+    records = {}
+    for devices, method in collections:
+        for data in devices:
+            ip_address = data.get("ip_address")
+            if not ip_address:
+                continue
+            record = records.setdefault(ip_address, {
+                "ip_address": ip_address,
+                "mac_address": None,
+                "hostname": None,
+                "vendor": "Bilinmiyor",
+                "open_ports": [],
+                "sources": [],
+            })
+            mac_address = _normalize_mac(data.get("mac_address"))
+            if mac_address:
+                record["mac_address"] = mac_address
+            if data.get("hostname") and not record.get("hostname"):
+                record["hostname"] = data["hostname"]
+            vendor = data.get("vendor")
+            if vendor and (not record.get("vendor") or record["vendor"] == "Bilinmiyor"):
+                record["vendor"] = vendor
+            _merge_open_ports(record["open_ports"], data.get("open_ports"))
+            if method not in record["sources"]:
+                record["sources"].append(method)
+    return list(records.values())
+
+
+def _enrich_with_previous_records(network, discovered):
+    previous = {}
+    for device in Device.objects.all():
+        try:
+            if ipaddress.ip_address(device.ip_address) in network:
+                previous[device.ip_address] = device
+        except ValueError:
+            continue
+    for data in discovered:
+        device = previous.get(data["ip_address"])
+        if not device:
+            continue
+        if not data.get("mac_address") and device.mac_address:
+            data["previous_mac_address"] = device.mac_address
+            data["mac_address"] = device.mac_address
+            data["identity_from_previous"] = True
+        if not data.get("hostname") and device.hostname:
+            data["hostname"] = device.hostname
+        if (not data.get("vendor") or data["vendor"] == "Bilinmiyor") and device.vendor:
+            data["vendor"] = device.vendor
+        if "previous-record" not in data["sources"]:
+            data["sources"].append("previous-record")
+    return discovered
+
+
+def _new_device_message(device, partial):
+    missing = (
+        " Cihaz ping'e cevap vermediği, güvenlik duvarı kullandığı veya aynı ağ katmanında olmadığı için "
+        "MAC/vendor bilgisi alınamamış olabilir."
+        if partial else ""
+    )
+    return (
+        "Ağda daha önce görülmeyen yeni bir cihaz tespit edildi. Bu cihaz size ait olabilir; "
+        "ancak tanınmayan cihazlar ağ güvenliği açısından kontrol edilmelidir."
+        f"{missing}"
+    )
+
+
+def _record_open_ports(device, open_ports):
+    recorded = 0
+    for item in open_ports or []:
+        try:
+            port = int(item.get("port"))
+        except (TypeError, ValueError):
+            continue
+        protocol = str(item.get("protocol") or "tcp").lower()
+        OpenPort.objects.update_or_create(
+            device=device,
+            port=port,
+            protocol=protocol,
+            defaults={
+                "service_name": item.get("service") or "",
+                "source": item.get("source") or "network-scan",
+            },
+        )
+        recorded += 1
+    return recorded
 
 
 def _record_devices(network, discovered):
     active_ips = []
     new_count = 0
+    open_port_count = 0
     for data in discovered:
         ip_address = data["ip_address"]
         try:
@@ -212,31 +436,35 @@ def _record_devices(network, discovered):
         active_ips.append(ip_address)
         previous = Device.objects.filter(ip_address=ip_address).first()
         old_mac = previous.mac_address if previous else None
+        current_mac = _normalize_mac(data.get("mac_address"))
+        current_vendor = data.get("vendor") or ""
+        has_current_identity = (
+            bool(current_mac)
+            and bool(current_vendor and current_vendor != "Bilinmiyor")
+            and not data.get("identity_from_previous")
+        )
+        partial = not has_current_identity
+        mac_address = current_mac or (previous.mac_address if previous else None)
+        hostname = data.get("hostname") if data.get("hostname") is not None else (previous.hostname if previous else None)
+        vendor = current_vendor if current_vendor and current_vendor != "Bilinmiyor" else (previous.vendor if previous and previous.vendor else "Bilinmiyor")
         device, created = Device.objects.update_or_create(
             ip_address=ip_address,
-            defaults={"mac_address": data.get("mac_address"), "hostname": data.get("hostname"),
-                      "vendor": data.get("vendor") or "Bilinmiyor", "status": "online"},
+            defaults={"mac_address": mac_address, "hostname": hostname, "vendor": vendor,
+                      "status": "partial" if partial else "online"},
         )
+        if current_mac:
+            ArpObservation.objects.create(
+                ip_address=ip_address,
+                mac_address=current_mac,
+                source="+".join(data.get("sources") or ["ARP gözlemi"])[:80],
+            )
+        open_port_count += _record_open_ports(device, data.get("open_ports"))
         if created:
             new_count += 1
-            existing_new_device_alert = Alert.objects.filter(
-                Q(source_ip=ip_address) | Q(device=device),
-                alert_type="new_device",
-                status="active",
-            ).exists()
-            if not existing_new_device_alert:
-                mac_note = f" MAC: {device.mac_address}" if device.mac_address else ""
-                Alert.objects.create(device=device, alert_type="new_device", severity="medium", status="active",
-                                     title=f"Yeni cihaz tespit edildi: {ip_address}",
-                                     message=f"Yeni cihaz tespit edildi: {ip_address}.{mac_note}",
-                                     source_ip=ip_address, source_mac=device.mac_address or "")
-        elif old_mac and device.mac_address and old_mac.lower() != device.mac_address.lower():
+        elif old_mac and current_mac and old_mac.lower() != current_mac.lower():
             SecurityEvent.objects.create(event_type="arp_anomaly", title="IP/MAC eslesmesi degisti",
-                                         description=f"{ip_address}: {old_mac} -> {device.mac_address}", level="danger",
-                                         source_ip=ip_address, source_mac=device.mac_address, risk_score=80)
-            Alert.objects.get_or_create(alert_type="arp_spoof", source_ip=ip_address, status="active",
-                                        defaults={"device": device, "severity": "high", "title": "ARP anomalisi",
-                                                  "message": "Ayni IP icin farkli MAC adresi gozlemlendi.", "source_mac": device.mac_address})
+                                         description=f"{ip_address}: {old_mac} -> {current_mac}", level="danger",
+                                         source_ip=ip_address, source_mac=current_mac, risk_score=80)
     for device in Device.objects.exclude(ip_address__in=active_ips):
         try:
             if ipaddress.ip_address(device.ip_address) in network:
@@ -244,17 +472,31 @@ def _record_devices(network, discovered):
                 device.save(update_fields=["status"])
         except ValueError:
             continue
-    return new_count, len(active_ips)
+    return new_count, len(active_ips), open_port_count
 
 
 def scan_network(force_demo=False, limit=None):
-    """Discover hosts on an explicitly bounded private LAN; never scans ports."""
+    """Discover hosts on an explicitly bounded private LAN with safe, limited checks."""
     if force_demo or get_value("guardiannet_mode", settings.GUARDIANNET_MODE) == "demo":
-        _seed_demo_fallback()
-        scan = NetworkScan.objects.create(network_range="192.0.2.0/24 (demo)", status="demo", scan_method="demo",
-                                          devices_found=len(DEMO_DEVICES), is_mock=True,
-                                          message="Demo modu kullanildi.", completed_at=timezone.now())
-        return {"success": True, "is_mock": True, "found_devices": len(DEMO_DEVICES), "new_devices": 0, "scan_id": scan.pk, "message": scan.message}
+        scan = NetworkScan.objects.create(
+            network_range="real-scan-disabled",
+            status="failed",
+            scan_method="disabled",
+            devices_found=0,
+            is_mock=False,
+            message="Demo/simülasyon veri üretimi devre dışı. Gerçek tarama için real modu kullanın.",
+            completed_at=timezone.now(),
+        )
+        return {
+            "success": False,
+            "is_mock": False,
+            "found_devices": 0,
+            "new_devices": 0,
+            "open_ports": 0,
+            "scan_id": scan.pk,
+            "message": scan.message,
+            "error": scan.message,
+        }
 
     scan = NetworkScan.objects.create(network_range="algilaniyor", status="failed", is_mock=False)
     try:
@@ -264,16 +506,26 @@ def scan_network(force_demo=False, limit=None):
         targets = _scan_targets(network, limit)
         scan.network_range = str(network)
         errors = []
-        try:
-            discovered, method = _scan_with_nmap(targets)
-        except Exception as nmap_error:
-            errors.append(str(nmap_error))
+        discovery_sets = []
+        scanners = [_scan_with_nmap, _scan_with_nmap_ports, _scan_with_scapy, lambda ignored: _scan_system_arp_table()]
+        for scanner in scanners:
             try:
-                discovered, method = _scan_with_scapy(targets)
-            except Exception as scapy_error:
-                errors.append(str(scapy_error))
-                raise RuntimeError("; ".join(errors)) from scapy_error
-        new_count, found_count = _record_devices(network, discovered)
+                found, method = scanner(targets)
+                discovery_sets.append((found, method))
+            except Exception as scan_error:
+                errors.append(str(scan_error))
+                if scanner == _scan_with_nmap_ports:
+                    try:
+                        found, method = _scan_with_socket_ports(targets)
+                        discovery_sets.append((found, method))
+                    except Exception as socket_error:
+                        errors.append(str(socket_error))
+        discovered = _merge_discovered_records(discovery_sets)
+        discovered = _enrich_with_previous_records(network, discovered)
+        method = "+".join(method for _, method in discovery_sets) or "none"
+        if not discovered and errors and not discovery_sets:
+            raise RuntimeError("; ".join(errors))
+        new_count, found_count, open_port_count = _record_devices(network, discovered)
         scan.status = "completed"
         scan.scan_method = method
         scan.devices_found = found_count
@@ -282,14 +534,15 @@ def scan_network(force_demo=False, limit=None):
         scan.completed_at = timezone.now()
         scan.save()
         return {"success": True, "is_mock": False, "found_devices": found_count, "new_devices": new_count,
-                "scan_id": scan.pk, "network": str(network), "method": method, "message": scan.message}
+                "open_ports": open_port_count, "scan_id": scan.pk, "network": str(network), "method": method,
+                "message": scan.message}
     except Exception as exc:
         scan.status = "failed"
         scan.is_mock = False
         scan.scan_method = "real-failed"
-        scan.message = "Gercek kesif basarisiz; demo fallback uretilmedi."
+        scan.message = "Gercek kesif basarisiz; guvenlik verisi uretilmedi."
         scan.notes = str(exc)
         scan.completed_at = timezone.now()
         scan.save()
         return {"success": False, "is_mock": False, "found_devices": 0, "new_devices": 0,
-                "scan_id": scan.pk, "message": scan.message, "error": str(exc)}
+                "open_ports": 0, "scan_id": scan.pk, "message": scan.message, "error": str(exc)}

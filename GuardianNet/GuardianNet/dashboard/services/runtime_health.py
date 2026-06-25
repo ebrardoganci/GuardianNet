@@ -54,8 +54,8 @@ def _nmap_checks():
                 "Nmap",
                 "warning",
                 "bulunamadi",
-                "Nmap PATH uzerinde bulunamadi.",
-                "Nmap kurulu degil veya PATH'e eklenmemis. Scapy fallback calisabilir.",
+                "Nmap bulunamadı, socket fallback aktif.",
+                "Nmap kurulu değilse GuardianNet sınırlı port listesi için güvenli socket fallback kullanır.",
             ),
             _check(
                 "nmap_version",
@@ -90,7 +90,7 @@ def _nmap_checks():
         )
 
     return [
-        _check("nmap_path", "Nmap", "ok", executable, "Nmap PATH uzerinde bulundu.", ""),
+        _check("nmap_path", "Nmap", "ok", executable, "Nmap bulundu.", ""),
         version_check,
     ]
 
@@ -107,7 +107,48 @@ def _scapy_check():
             f"Scapy import edilemedi: {exc}",
             "Nmap yoksa ARP discovery icin scapy ve gerekli sistem izinleri gerekir.",
         )
-    return _check("scapy_import", "Scapy", "ok", "import edildi", "Scapy import edilebiliyor.", "")
+    return _check("scapy_import", "Scapy", "ok", "import edildi", "Scapy aktif.", "")
+
+
+def _socket_fallback_check():
+    if shutil.which("nmap"):
+        return _check(
+            "socket_fallback",
+            "Socket fallback",
+            "ok",
+            "hazir",
+            "Nmap bulundu; socket fallback yedek olarak hazır.",
+            "",
+        )
+    return _check(
+        "socket_fallback",
+        "Socket fallback",
+        "ok",
+        "aktif",
+        "Nmap bulunamadı, socket fallback aktif.",
+        "Fallback yalnızca izinli LOCAL_SUBNET içinde sınırlı port listesini kısa timeout ile dener.",
+    )
+
+
+def _arp_table_check():
+    executable = shutil.which("arp")
+    if not executable:
+        return _check(
+            "arp_table",
+            "ARP tablo okuma",
+            "warning",
+            "bulunamadi",
+            "ARP komutu bulunamadı.",
+            "Sistem ARP tablosu fallback kaynağı olarak kullanılamaz.",
+        )
+    return _check(
+        "arp_table",
+        "ARP tablo okuma",
+        "ok",
+        executable,
+        "ARP fallback aktif.",
+        "",
+    )
 
 
 def _npcap_check():
@@ -324,6 +365,8 @@ def get_runtime_health():
     )
     checks.extend(_nmap_checks())
     checks.append(_scapy_check())
+    checks.append(_socket_fallback_check())
+    checks.append(_arp_table_check())
     checks.append(_npcap_check())
     checks.extend(_opencanary_checks())
     checks.extend(_latest_checks(mode))

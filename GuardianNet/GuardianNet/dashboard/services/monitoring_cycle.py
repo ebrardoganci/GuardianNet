@@ -53,9 +53,12 @@ def _honeypot_summary(honeypot_result, honeypot_status):
 def _analysis_summary(analysis_result, analysis_status):
     if analysis_result:
         return (
+            f"new_devices={analysis_result.get('new_devices', 0)}, "
+            f"open_ports={analysis_result.get('open_ports', 0)}, "
             f"ARP={analysis_result.get('arp')}, "
             f"port={analysis_result.get('port')}, "
             f"SSH={analysis_result.get('ssh')}, "
+            f"DoS={analysis_result.get('dos', 0)}, "
             f"risk={analysis_result.get('risk')}"
         )
     return "error" if analysis_status == "failed" else "skipped"

@@ -12,11 +12,12 @@ from dashboard.models import HoneypotEvent, SystemSetting
 from dashboard.services.runtime_settings import get_bool, get_value
 
 
-PORT_SERVICES = {21: "ftp", 22: "ssh", 80: "http", 8080: "http", 2121: "ftp", 2222: "ssh"}
-SUPPORTED_SERVICES = {"ssh", "http", "ftp"}
+PORT_SERVICES = {21: "ftp", 22: "ssh", 23: "telnet", 80: "http", 8080: "http", 2121: "ftp", 2222: "ssh"}
+SUPPORTED_SERVICES = {"ssh", "http", "ftp", "telnet"}
 EVENT_ID_KEYS = ("event_id", "id", "uuid", "log_id", "logid")
 TIMESTAMP_KEYS = ("local_time", "timestamp", "time", "utc_time")
 SOURCE_IP_KEYS = ("src_host", "src_ip", "source_ip", "source", "remote_ip", "remote_addr", "host")
+SOURCE_PORT_KEYS = ("src_port", "source_port", "sport", "remote_port")
 DESTINATION_PORT_KEYS = ("dst_port", "destination_port", "port", "dport")
 USERNAME_KEYS = ("USERNAME", "USER", "USER_NAME", "username", "user", "login")
 COMMAND_KEYS = (
@@ -56,10 +57,12 @@ def get_honeypot_status():
     else:
         mode = "disabled"
         label = "Honeypot loglari kapali"
+    listener_events = HoneypotEvent.objects.filter(source_type="Honeypot listener", is_mock=False).count()
     return {"mode": mode,
             "label": label,
             "services": {"ssh": "izleniyor", "http": "izleniyor", "ftp": "izleniyor"},
-            "available": available, "executable": shutil.which("opencanaryd") is not None, "log_path": str(path)}
+            "available": available, "executable": shutil.which("opencanaryd") is not None,
+            "listener_events": listener_events, "log_path": str(path)}
 
 
 def _parse_time(value):
@@ -172,7 +175,13 @@ def _event_values(payload):
         (logdata, DESTINATION_PORT_KEYS + ("PORT", "DST_PORT", "DESTINATION_PORT")),
         (nested, DESTINATION_PORT_KEYS + ("PORT", "DST_PORT", "DESTINATION_PORT")),
     )
+    source_port = _first_value(
+        (payload, SOURCE_PORT_KEYS),
+        (logdata, SOURCE_PORT_KEYS + ("SRC_PORT", "SOURCE_PORT")),
+        (nested, SOURCE_PORT_KEYS + ("SRC_PORT", "SOURCE_PORT")),
+    )
     destination_port = _parse_port(destination_port)
+    source_port = _parse_port(source_port)
     service = _normalize_service(_first_value((payload, ("service", "protocol", "logtype")), (logdata, ("service", "protocol"))), destination_port, logdata)
     source_ip = _normalize_source_ip(source_ip)
     username = str(_first_value((logdata, USERNAME_KEYS), (nested, USERNAME_KEYS), (payload, USERNAME_KEYS)) or "")[:100]
@@ -183,7 +192,8 @@ def _event_values(payload):
     ) or "")[:255]
     success = _as_bool(_first_value((logdata, SUCCESS_KEYS), (nested, SUCCESS_KEYS), (payload, SUCCESS_KEYS)) or False)
     observed_at = _parse_time(_first_value((payload, TIMESTAMP_KEYS), (logdata, TIMESTAMP_KEYS)))
-    return source_ip, service, username, command, destination_port, success, observed_at
+    event_type = "auth_failure" if username and not success else "request" if service == "http" else "connection"
+    return source_ip, source_port, service, username, command, destination_port, success, observed_at, event_type
 
 
 def _event_id(payload, source_ip, service, username, command, destination_port, observed_at):
@@ -231,7 +241,7 @@ def ingest_honeypot_logs(path=None):
                 if not isinstance(payload, dict):
                     ignored += 1
                     continue
-                source_ip, service, username, command, port, success, observed_at = _event_values(payload)
+                source_ip, source_port, service, username, command, port, success, observed_at, event_type = _event_values(payload)
                 if _is_lifecycle_payload(payload, source_ip, port):
                     ignored += 1
                     continue
@@ -242,8 +252,10 @@ def ingest_honeypot_logs(path=None):
                     skipped += 1
                     continue
                 event = HoneypotEvent.objects.create(event_id=event_id, source_ip=source_ip, service=service,
-                                                     username=username, command=command, destination_port=port,
-                                                     login_success=success, raw_data=payload, is_mock=False)
+                                                     source_port=source_port, username=username, command=command,
+                                                     destination_port=port, protocol="tcp", event_type=event_type,
+                                                     source_type="OpenCanary logu", login_success=success,
+                                                     raw_data=payload, is_mock=False)
                 if observed_at:
                     HoneypotEvent.objects.filter(pk=event.pk).update(created_at=observed_at)
                 created_count += 1

@@ -2,7 +2,7 @@ import ipaddress
 
 from django.db.models import Q
 
-from dashboard.models import Alert, Device, HoneypotEvent, NetworkScan, RiskSnapshot, SecurityEvent, SystemSetting
+from dashboard.models import Alert, Device, HoneypotEvent, NetworkScan, OpenPort, RiskSnapshot, SecurityEvent, SystemSetting
 from dashboard.services.network_scanner import resolve_target_subnet
 from dashboard.services.runtime_settings import get_value
 
@@ -16,11 +16,23 @@ LOCAL_PRIVATE_NETWORKS = tuple(
     for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 )
 DEMO_TEXT_MARKERS = ("demo", "fallback", "fake", "mock")
-LOCAL_ALERT_TYPES = ("new_device", "arp_spoof", "arp_anomaly", "port_scan", "brute_force", "suspicious_traffic")
+LOCAL_ALERT_TYPES = (
+    "new_device",
+    "arp_spoof",
+    "arp_anomaly",
+    "port_scan",
+    "brute_force",
+    "dos_suspected",
+    "ssh_port_open",
+    "telnet_port_open",
+    "database_port_open",
+    "risky_port",
+    "suspicious_traffic",
+)
 
 
 def is_real_mode():
-    return str(get_value("guardiannet_mode", "real")).strip().lower() == "real"
+    return True
 
 
 def ip_in_networks(value, networks):
@@ -166,6 +178,15 @@ def real_security_events(queryset=None):
     queryset = queryset if queryset is not None else SecurityEvent.objects.all()
     queryset = queryset.exclude(event_type="system").exclude(demo_text_q("event_type", "title", "description"))
     return exclude_invalid_real_scope_ips(queryset, ("source_ip", "destination_ip"))
+
+
+def real_open_ports(queryset=None):
+    queryset = queryset if queryset is not None else OpenPort.objects.all()
+    subnet = get_current_subnet()
+    if subnet is None:
+        return queryset.none()
+    valid_device_ids = devices_for_subnet(Device.objects.all(), subnet).values("pk")
+    return queryset.filter(device_id__in=valid_device_ids).exclude(device__ip_address__startswith="192.0.2.")
 
 
 def real_honeypot_events(queryset=None):

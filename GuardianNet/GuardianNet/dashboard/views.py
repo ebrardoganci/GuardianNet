@@ -10,7 +10,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from .models import Alert, Device, HoneypotEvent, MonitoringCycleRun, NetworkScan, RiskSnapshot, SecurityEvent, SystemSetting
+from .models import Alert, Device, HoneypotEvent, MonitoringCycleRun, NetworkScan, OpenPort, RiskSnapshot, SecurityEvent, SystemSetting
+from .security_explanations import get_alert_explanation, get_port_explanation
 from .services.honeypot_manager import get_honeypot_status
 from .services.monitoring_cycle import run_monitoring_cycle as execute_monitoring_cycle
 from .services.network_scanner import scan_network
@@ -26,12 +27,14 @@ from .services.data_scope import (
 from .services.risk_engine import calculate_risk
 from .services.runtime_health import get_runtime_health
 from .services.runtime_settings import get_bool, get_value
+from .services.security_data import CLEAR_TARGETS, clear_security_data
 
 
 DEVICE_FILTERS = {
     "all": "Tumu",
     "online": "Online",
     "offline": "Offline",
+    "partial": "Eksik bilgi",
     "new": "Yeni cihazlar",
     "alerts": "Uyarisi olan cihazlar",
 }
@@ -77,12 +80,13 @@ def _cycle_message(result):
 
 def _risk_context():
     _, alerts_qs, events_qs, _ = _data_sources()
-    calculated = calculate_risk(alerts_qs.filter(status="active"), events_qs)
+    calculated = calculate_risk(alerts_qs.filter(status="active"), events_qs, include_reasons=True)
     if is_real_mode():
         return calculated
     latest = RiskSnapshot.objects.first()
     if latest:
-        return {"risk_score": latest.risk_score, "risk_level": latest.risk_level, "security_score": latest.security_score}
+        calculated.update({"risk_score": latest.risk_score, "risk_level": latest.risk_level, "security_score": latest.security_score})
+        return calculated
     return calculated
 
 
@@ -103,6 +107,26 @@ def _latest_real_scan():
     return NetworkScan.objects.filter(is_mock=False, status="completed").order_by("-started_at").first()
 
 
+def _device_open_port_rows(device):
+    ports_qs = OpenPort.objects.filter(device=device).order_by("port")
+    rows_by_port = {}
+    for open_port in ports_qs:
+        if open_port.port in rows_by_port:
+            continue
+        explanation = get_port_explanation(open_port.port, open_port.service_name)
+        rows_by_port[open_port.port] = {
+            "port": open_port.port,
+            "service": explanation["service"],
+            "description": explanation["description"],
+            "risk": explanation["risk"],
+            "risk_key": explanation["risk_key"],
+            "action": explanation["action"],
+            "source": open_port.source or "Gerçek ağ taraması",
+            "last_seen": open_port.last_seen,
+        }
+    return [rows_by_port[key] for key in sorted(rows_by_port)]
+
+
 def _inventory_rows(devices_qs):
     latest_scan = _latest_real_scan()
     active_alerts_qs = real_alerts(Alert.objects.filter(status="active")) if is_real_mode() else Alert.objects.filter(status="active")
@@ -113,9 +137,10 @@ def _inventory_rows(devices_qs):
         has_new_alert = new_alerts_qs.filter(Q(device=device) | Q(source_ip=device.ip_address)).exists()
         rows.append({
             "device": device,
-            "seen_in_last_scan": device.status == "online" and latest_scan is not None,
+            "seen_in_last_scan": device.status in {"online", "partial"} and latest_scan is not None,
             "active_alert_count": device_alerts.count(),
             "is_new": has_new_alert or (latest_scan is not None and device.first_seen >= latest_scan.started_at),
+            "open_ports": _device_open_port_rows(device),
         })
     return rows
 
@@ -125,6 +150,8 @@ def _apply_device_filter(rows, filter_key):
         return [row for row in rows if row["device"].status == "online"]
     if filter_key == "offline":
         return [row for row in rows if row["device"].status == "offline"]
+    if filter_key == "partial":
+        return [row for row in rows if row["device"].status == "partial"]
     if filter_key == "new":
         return [row for row in rows if row["is_new"]]
     if filter_key == "alerts":
@@ -135,14 +162,14 @@ def _apply_device_filter(rows, filter_key):
 @login_required
 def index(request):
     mode = get_value("guardiannet_mode", "real")
-    if mode == "demo" and not Device.objects.exists():
-        scan_network(force_demo=True)
     devices_qs, alerts_qs, events_qs, honeypot_qs = _data_sources()
     online = devices_qs.filter(status="online").count()
     offline = devices_qs.filter(status="offline").count()
+    partial = devices_qs.filter(status="partial").count()
     unknown = devices_qs.filter(status="unknown").count()
     latest_scan = _latest_real_scan()
     latest_cycle = MonitoringCycleRun.objects.first()
+    latest_analysis = RiskSnapshot.objects.first()
     recent_honeypot_events = list(honeypot_qs[:5])
     has_recent_ssh_honeypot_event = any(event.service == "ssh" for event in recent_honeypot_events)
     active_alerts_count = (
@@ -152,17 +179,19 @@ def index(request):
     )
     context = {
         "total_devices": devices_qs.count(), "active_devices": online,
-        "online_devices": online, "offline_devices": offline,
+        "online_devices": online, "offline_devices": offline, "partial_devices": partial,
         "last_scan_found_devices": latest_scan.devices_found if latest_scan else None,
+        "latest_scan": latest_scan,
         "active_alerts": active_alerts_count,
         "recent_events": events_qs[:6], "recent_alerts": alerts_qs[:6],
         "recent_honeypot_events": recent_honeypot_events,
         "has_recent_ssh_honeypot_event": has_recent_ssh_honeypot_event,
         "honeypot_status": get_honeypot_status(),
         "latest_monitoring_cycle": latest_cycle,
+        "latest_analysis": latest_analysis,
         "monitoring_scan_limit_default": _monitoring_scan_limit_default(),
         "operation_mode": mode,
-        "device_chart": {"labels": ["Online", "Offline", "Bilinmiyor"], "values": [online, offline, unknown]},
+        "device_chart": {"labels": ["Online", "Offline", "Kısmen algılandı", "Bilinmiyor"], "values": [online, offline, partial, unknown]},
         "severity_chart": {"labels": ["Dusuk", "Orta", "Yuksek", "Kritik"], "values": [alerts_qs.filter(severity=value).count() for value in ["low", "medium", "high", "critical"]]},
         **_risk_context(),
     }
@@ -223,6 +252,7 @@ def device_detail(request, pk):
         "inventory": row,
         "alerts": alerts_qs,
         "events": events_qs,
+        "open_port_rows": _device_open_port_rows(device),
     })
 
 
@@ -246,8 +276,10 @@ def alerts(request):
         alerts_qs = alerts_qs.filter(severity=severity_filter)
     if type_filter != "all":
         alerts_qs = alerts_qs.filter(alert_type=type_filter)
+    alert_rows = [{"alert": item, "explanation": get_alert_explanation(item)} for item in alerts_qs]
     return render(request, "dashboard/alerts.html", {
         "alerts": alerts_qs,
+        "alert_rows": alert_rows,
         "status_filters": ALERT_STATUS_FILTERS,
         "severity_filters": Alert.SEVERITY_CHOICES,
         "type_filters": Alert.ALERT_TYPE_CHOICES,
@@ -281,7 +313,7 @@ def security_events(request):
 
 @login_required
 def reports(request):
-    devices_qs, _, events_qs, honeypot_qs = _data_sources()
+    devices_qs, alerts_qs, events_qs, honeypot_qs = _data_sources()
     since = timezone.now() - timedelta(days=7)
     daily_counts = {}
     for row in events_qs.filter(created_at__gte=since).annotate(day=TruncDate("created_at")).values("day").annotate(total=Count("id")):
@@ -290,24 +322,38 @@ def reports(request):
         daily_counts[row["day"]] = daily_counts.get(row["day"], 0) + row["total"]
     daily = [{"day": day, "total": total} for day, total in sorted(daily_counts.items())]
     service_rows = list(honeypot_qs.values("service").annotate(total=Count("id")).order_by("service"))
+    open_port_rows = list(
+        OpenPort.objects.filter(device__in=devices_qs)
+        .values("port")
+        .annotate(total=Count("id"))
+        .order_by("port")
+    )
+    alert_type_labels = dict(Alert.ALERT_TYPE_CHOICES)
+    alert_type_rows = list(alerts_qs.values("alert_type").annotate(total=Count("id")).order_by("alert_type"))
     snapshot_qs = RiskSnapshot.objects.order_by("recorded_at")
     if is_real_mode():
         snapshot_qs = real_risk_snapshots(snapshot_qs)
     snapshots = list(snapshot_qs)
     online = devices_qs.filter(status="online").count()
     offline = devices_qs.filter(status="offline").count()
+    partial = devices_qs.filter(status="partial").count()
     untrusted = devices_qs.filter(is_trusted=False).count()
+    new_devices = devices_qs.filter(first_seen__gte=since).count()
     activity_chart = {"labels": [row["day"].isoformat() for row in daily], "values": [row["total"] for row in daily]}
     risk_chart = {"labels": [item.recorded_at.strftime("%d.%m") for item in snapshots], "values": [item.risk_score for item in snapshots]}
-    device_report_chart = {"labels": ["Online", "Offline", "Bilinmeyen"], "values": [online, offline, untrusted]}
+    device_report_chart = {"labels": ["Online", "Offline", "Kısmen algılandı", "Güvenilmeyen", "Yeni cihaz"], "values": [online, offline, partial, untrusted, new_devices]}
     service_chart = {"labels": [row["service"].upper() for row in service_rows], "values": [row["total"] for row in service_rows]}
+    open_port_chart = {"labels": [str(row["port"]) for row in open_port_rows], "values": [row["total"] for row in open_port_rows]}
+    alert_type_chart = {"labels": [alert_type_labels.get(row["alert_type"], row["alert_type"]) for row in alert_type_rows], "values": [row["total"] for row in alert_type_rows]}
     context = {
         "risky_devices": devices_qs.order_by("-risk_score")[:10],
         "daily_chart": activity_chart,
         "risk_chart": risk_chart,
         "device_report_chart": device_report_chart,
         "service_chart": service_chart,
-        "has_report_data": any(activity_chart["values"] + risk_chart["values"] + device_report_chart["values"] + service_chart["values"]),
+        "open_port_chart": open_port_chart,
+        "alert_type_chart": alert_type_chart,
+        "has_report_data": any(activity_chart["values"] + risk_chart["values"] + device_report_chart["values"] + service_chart["values"] + open_port_chart["values"] + alert_type_chart["values"]),
     }
     return render(request, "dashboard/reports.html", context)
 
@@ -327,15 +373,13 @@ def honeypot(request):
 def settings_view(request):
     if request.method == "POST":
         values = {
-            "guardiannet_mode": request.POST.get("guardiannet_mode", "real"),
+            "guardiannet_mode": "real",
             "local_subnet": request.POST.get("local_subnet", "").strip(),
             "scan_interval_seconds": request.POST.get("scan_interval_seconds", "300"),
             "opencanary_log_path": request.POST.get("opencanary_log_path", "").strip() or get_value("opencanary_log_path", ""),
             "enable_real_scan": "true" if request.POST.get("enable_real_scan") else "false",
             "enable_honeypot_logs": "true" if request.POST.get("enable_honeypot_logs") else "false",
         }
-        if values["guardiannet_mode"] not in {"real", "demo"}:
-            values["guardiannet_mode"] = "real"
         for key, value in values.items():
             SystemSetting.objects.update_or_create(key=key, defaults={"value": value, "description": "GuardianNet calisma ayari"})
         messages.success(request, "Ayar kaydedildi.")
@@ -358,8 +402,24 @@ def settings_view(request):
         "opencanary_log_path": get_value("opencanary_log_path", ""),
         "honeypot_status": get_honeypot_status(), "last_scan": last_scan_qs.first(),
         "last_ingest": last_ingest.value if last_ingest else "Henuz calismadi",
+        "last_analysis": RiskSnapshot.objects.first(),
         "runtime_health_checks": get_runtime_health(),
+        "clear_targets": CLEAR_TARGETS,
+        "subnet_warning": "/" in used_subnet and used_subnet.rsplit("/", 1)[-1].isdigit() and int(used_subnet.rsplit("/", 1)[-1]) > 24,
     })
+
+
+@login_required
+@require_POST
+def clear_security_data_view(request):
+    target = request.POST.get("target", "")
+    try:
+        result = clear_security_data(target)
+    except ValueError as exc:
+        messages.error(request, str(exc))
+        return redirect("dashboard:settings")
+    messages.success(request, f"{result['label']} temizlendi. Silinen kayıt: {result['total']}.")
+    return redirect("dashboard:settings")
 
 
 @login_required
@@ -369,5 +429,5 @@ def scan_network_view(request):
         if result["success"]:
             messages.success(request, f"Yerel cihaz kesfi tamamlandi. {result['found_devices']} cihaz bulundu.")
         else:
-            messages.warning(request, f"Gercek kesif yapilamadi; demo fallback uretilmedi. {result.get('error', '')}")
+            messages.warning(request, f"Gercek kesif yapilamadi; guvenlik verisi uretilmedi. {result.get('error', '')}")
     return redirect("dashboard:index")

@@ -9,5 +9,8 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         result = run_security_analysis()
         self.stdout.write(self.style.SUCCESS(
-            f"Analiz tamamlandi. ARP: {result['arp']}, port: {result['port']}, SSH: {result['ssh']}, risk: {result['risk']}"
+            "Analiz tamamlandi. "
+            f"Yeni cihaz: {result.get('new_devices', 0)}, acik port: {result.get('open_ports', 0)}, "
+            f"ARP: {result['arp']}, port scan: {result['port']}, SSH: {result['ssh']}, "
+            f"DoS: {result.get('dos', 0)}, risk: {result['risk']}"
         ))

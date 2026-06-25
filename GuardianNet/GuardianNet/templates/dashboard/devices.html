@@ -15,8 +15,57 @@
 <section class="panel">
   <div class="table-wrap">
     <table>
-      <thead><tr><th>IP</th><th>MAC</th><th>Hostname</th><th>Vendor</th><th>Durum</th><th>Etiket</th><th>İlk Görülme</th><th>Son Görülme</th><th>Son Taramada</th><th>Aktif Uyarı</th></tr></thead>
-      <tbody>{% for row in device_rows %}<tr><td><a href="{% url 'dashboard:device_detail' row.device.pk %}">{{ row.device.ip_address }}</a></td><td>{{ row.device.mac_address|default:'-' }}</td><td>{{ row.device.hostname|default:'-' }}</td><td>{{ row.device.vendor|default:'-' }}</td><td><span class="badge status-{{ row.device.status }}">{{ row.device.get_status_display }}</span></td><td>{% if row.is_new or not row.device.is_trusted %}<span class="badge severity-warning">Yeni/bilinmeyen cihaz</span>{% else %}<span class="badge severity-info">Bilinen cihaz</span>{% endif %}</td><td>{{ row.device.first_seen|date:'d.m.Y H:i' }}</td><td>{{ row.device.last_seen|date:'d.m.Y H:i' }}</td><td>{% if row.seen_in_last_scan %}Evet{% else %}Hayır{% endif %}</td><td>{{ row.active_alert_count }}</td></tr>{% empty %}<tr><td colspan="10">Cihaz kaydı yok.</td></tr>{% endfor %}</tbody>
+      <thead>
+        <tr>
+          <th>IP</th>
+          <th>MAC</th>
+          <th>Hostname</th>
+          <th>Vendor</th>
+          <th>Durum</th>
+          <th>Etiket</th>
+          <th>Açık Portlar</th>
+          <th>İlk Görülme</th>
+          <th>Son Görülme</th>
+          <th>Son Taramada</th>
+          <th>Aktif Uyarı</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in device_rows %}
+        <tr>
+          <td><a href="{% url 'dashboard:device_detail' row.device.pk %}">{{ row.device.ip_address }}</a></td>
+          <td>{{ row.device.mac_address|default:'-' }}</td>
+          <td>{{ row.device.hostname|default:'-' }}</td>
+          <td>{{ row.device.vendor|default:'-' }}</td>
+          <td><span class="badge status-{{ row.device.status }}">{{ row.device.get_status_display }}</span></td>
+          <td>
+            {% if row.device.status == "partial" %}
+            <span class="badge severity-warning">Eksik bilgi</span>
+            {% elif row.is_new or not row.device.is_trusted %}
+            <span class="badge severity-warning">Yeni/bilinmeyen cihaz</span>
+            {% else %}
+            <span class="badge severity-info">Bilinen cihaz</span>
+            {% endif %}
+          </td>
+          <td>
+            {% for port in row.open_ports %}
+            <div>
+              <span class="badge severity-{{ port.risk_key }}">{{ port.port }} {{ port.service }}</span>
+              <small>{{ port.description }} Öneri: {{ port.action }}</small>
+            </div>
+            {% empty %}
+            -
+            {% endfor %}
+          </td>
+          <td>{{ row.device.first_seen|date:'d.m.Y H:i' }}</td>
+          <td>{{ row.device.last_seen|date:'d.m.Y H:i' }}</td>
+          <td>{% if row.seen_in_last_scan %}Evet{% else %}Hayır{% endif %}</td>
+          <td>{{ row.active_alert_count }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="11">Cihaz kaydı yok.</td></tr>
+        {% endfor %}
+      </tbody>
     </table>
   </div>
 </section>

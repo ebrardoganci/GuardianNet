@@ -1,4 +1,4 @@
-from dashboard.models import Alert, Device, SecurityEvent
+from dashboard.models import Alert, ArpObservation, Device, SecurityEvent
 from dashboard.services.data_scope import is_real_mode, real_devices
 
 
@@ -24,10 +24,14 @@ def detect_arp_anomalies(entries):
 
 def analyze_arp_observations(entries=None):
     if entries is None:
-        device_qs = Device.objects.exclude(mac_address__isnull=True)
-        if is_real_mode():
-            device_qs = real_devices(device_qs)
-        entries = list(device_qs.values("ip_address", "mac_address"))
+        observation_qs = ArpObservation.objects.all()
+        if observation_qs.exists():
+            entries = list(observation_qs.values("ip_address", "mac_address", "is_gateway", "source"))
+        else:
+            device_qs = Device.objects.exclude(mac_address__isnull=True)
+            if is_real_mode():
+                device_qs = real_devices(device_qs)
+            entries = list(device_qs.values("ip_address", "mac_address"))
     anomalies = detect_arp_anomalies(entries)
     for item in anomalies:
         if item.get("type") == "mac_multi_ip":
@@ -42,6 +46,6 @@ def analyze_arp_observations(entries=None):
         )
         Alert.objects.get_or_create(
             alert_type="arp_spoof", source_ip=source_ip, status="active",
-            defaults={"severity": "high", "title": "Olasi ARP spoofing suphesi", "message": description},
+            defaults={"severity": "high", "title": "Olasi ARP spoofing suphesi", "message": f"{description} Kaynak veri türü: ARP gözlemi."},
         )
     return anomalies

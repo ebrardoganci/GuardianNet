@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Alert, Device, HoneypotEvent, MonitoringCycleRun, NetworkScan, RiskSnapshot, SecurityEvent, SystemSetting
+from .models import Alert, ArpObservation, Device, HoneypotEvent, MonitoringCycleRun, NetworkScan, OpenPort, RiskSnapshot, SecurityEvent, SystemSetting
 
 
 @admin.register(Device)
@@ -24,6 +24,13 @@ class SecurityEventAdmin(admin.ModelAdmin):
     search_fields = ("title", "description", "source_ip", "source_mac", "destination_ip")
 
 
+@admin.register(OpenPort)
+class OpenPortAdmin(admin.ModelAdmin):
+    list_display = ("device", "port", "protocol", "service_name", "source", "first_seen", "last_seen")
+    list_filter = ("protocol", "service_name", "source", "last_seen")
+    search_fields = ("device__ip_address", "service_name", "source")
+
+
 @admin.register(NetworkScan)
 class NetworkScanAdmin(admin.ModelAdmin):
     list_display = ("network_range", "status", "scan_method", "devices_found", "is_mock", "started_at", "completed_at")
@@ -33,9 +40,16 @@ class NetworkScanAdmin(admin.ModelAdmin):
 
 @admin.register(HoneypotEvent)
 class HoneypotEventAdmin(admin.ModelAdmin):
-    list_display = ("source_ip", "service", "destination_port", "username", "login_success", "is_mock", "created_at")
-    list_filter = ("service", "login_success", "is_mock", "created_at")
+    list_display = ("source_ip", "source_port", "service", "destination_port", "event_type", "source_type", "login_success", "is_mock", "created_at")
+    list_filter = ("service", "event_type", "source_type", "login_success", "is_mock", "created_at")
     search_fields = ("event_id", "source_ip", "username", "command")
+
+
+@admin.register(ArpObservation)
+class ArpObservationAdmin(admin.ModelAdmin):
+    list_display = ("ip_address", "mac_address", "source", "is_gateway", "observed_at")
+    list_filter = ("source", "is_gateway", "observed_at")
+    search_fields = ("ip_address", "mac_address", "source")
 
 
 @admin.register(SystemSetting)

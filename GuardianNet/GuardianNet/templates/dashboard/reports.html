@@ -9,26 +9,44 @@
   <section class="panel">
     <h2>Günlük Honeypot / Güvenlik Olayı</h2>
     <div class="chart-box"><canvas id="daily-chart"></canvas></div>
+    <p>Bu grafik, son günlerde kaç güvenlik olayı veya honeypot kaydı oluştuğunu gösterir. Ani artışlar incelenmelidir.</p>
   </section>
   <section class="panel">
     <h2>Risk Skoru Geçmişi</h2>
     <div class="chart-box"><canvas id="risk-chart"></canvas></div>
+    <p>Risk skoru grafiği, ağdaki uyarıların zaman içinde genel riski nasıl değiştirdiğini anlatır.</p>
   </section>
 </div>
 <div class="grid-2">
   <section class="panel">
     <h2>Cihaz Durumu</h2>
     <div class="chart-box"><canvas id="device-report-chart"></canvas></div>
+    <p>Yeni cihaz sayısı önemlidir; tanımadığınız cihazlar ağınıza izinsiz bağlanmış olabilir veya sadece yeni eklenen size ait cihazlar olabilir.</p>
   </section>
   <section class="panel">
     <h2>Honeypot Servis Dağılımı</h2>
     <div class="chart-box"><canvas id="service-chart"></canvas></div>
+    <p>Bu grafik, honeypot üzerinde hangi servislerin daha çok yoklandığını gösterir.</p>
+  </section>
+</div>
+<div class="grid-2">
+  <section class="panel">
+    <h2>Açık Port Sayısı</h2>
+    <div class="chart-box"><canvas id="open-port-chart"></canvas></div>
+    <p>Açık port sayısı grafiği, hangi portların cihazlarda erişilebilir göründüğünü gösterir. Gereksiz açık portlar kapatılmalıdır.</p>
+  </section>
+  <section class="panel">
+    <h2>Uyarı Türleri</h2>
+    <div class="chart-box"><canvas id="alert-type-chart"></canvas></div>
+    <p>Uyarı türleri grafiği, ağda en çok hangi güvenlik konularının öne çıktığını gösterir.</p>
   </section>
 </div>
 {{ daily_chart|json_script:"daily-chart-data" }}
 {{ risk_chart|json_script:"risk-chart-data" }}
 {{ device_report_chart|json_script:"device-report-chart-data" }}
 {{ service_chart|json_script:"service-chart-data" }}
+{{ open_port_chart|json_script:"open-port-chart-data" }}
+{{ alert_type_chart|json_script:"alert-type-chart-data" }}
 {% else %}
 <section class="panel">
   <p>Henüz raporlanacak veri yok.</p>

@@ -11,6 +11,40 @@
   </div>
   <p>İlk görülme: <strong>{{ device.first_seen|date:'d.m.Y H:i' }}</strong> · Son görülme: <strong>{{ device.last_seen|date:'d.m.Y H:i' }}</strong></p>
 </section>
+<section class="panel">
+  <h2>Açık Portlar</h2>
+  <p>Açık port, cihazdaki bir servisin ağdan bağlantı kabul edebildiğini gösterir. Bu tek başına saldırı değildir; gereksiz portlar kapatılmalı veya erişimi kısıtlanmalıdır.</p>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Port</th>
+          <th>Servis</th>
+          <th>Basit Açıklama</th>
+          <th>Risk</th>
+          <th>Önerilen Aksiyon</th>
+          <th>Kaynak</th>
+          <th>Son Gözlem</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for port in open_port_rows %}
+        <tr>
+          <td>{{ port.port }}</td>
+          <td>{{ port.service }}</td>
+          <td>{{ port.description }}</td>
+          <td><span class="badge severity-{{ port.risk_key }}">{{ port.risk }}</span></td>
+          <td>{{ port.action }}</td>
+          <td>{{ port.source }}</td>
+          <td>{{ port.last_seen|date:'d.m.Y H:i' }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7">Bu cihaz için kayıtlı açık port yok.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 <div class="grid-2">
   <section class="panel">
     <h2>İlişkili Uyarılar</h2>

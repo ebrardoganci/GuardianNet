@@ -11,13 +11,18 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import Alert, Device, HoneypotEvent, MonitoringCycleRun, RiskSnapshot, SecurityEvent
+from .models import Alert, ArpObservation, Device, HoneypotEvent, MonitoringCycleRun, NetworkScan, OpenPort, RiskSnapshot, SecurityEvent
+from .security_explanations import get_port_explanation
 from .services.arp_monitor import analyze_arp_observations, detect_arp_anomalies
 from .services.bruteforce_detector import analyze_bruteforce_logs, analyze_ssh_attempt_logs, detect_bruteforce
+from .services.dos_detector import analyze_dos_logs, detect_dos_patterns
 from .services.honeypot_manager import ingest_honeypot_logs
+from .services.honeypot_listener import record_honeypot_connection
 from .services.network_scanner import resolve_target_subnet, scan_network
 from .services.port_scan_detector import analyze_port_scan_logs, detect_port_scan
+from .services.risk_engine import calculate_risk
 from .services.runtime_health import get_runtime_health
+from .services.security_analysis import run_security_analysis
 
 
 class DashboardMVPTests(TestCase):
@@ -33,17 +38,23 @@ class DashboardMVPTests(TestCase):
         for name in names:
             self.assertEqual(self.client.get(reverse(name)).status_code, 200)
 
-    def test_seed_command_is_idempotent(self):
-        call_command("seed_demo_data", verbosity=0)
-        first = (Device.objects.count(), Alert.objects.count(), SecurityEvent.objects.count(), HoneypotEvent.objects.count(), RiskSnapshot.objects.count())
-        call_command("seed_demo_data", verbosity=0)
-        self.assertEqual(first, (Device.objects.count(), Alert.objects.count(), SecurityEvent.objects.count(), HoneypotEvent.objects.count(), RiskSnapshot.objects.count()))
+    def test_demo_commands_do_not_create_security_data(self):
+        output = StringIO()
+        call_command("seed_demo_data", stdout=output)
+        call_command("simulate_security_events", stdout=output)
+        self.assertEqual(Device.objects.count(), 0)
+        self.assertEqual(Alert.objects.count(), 0)
+        self.assertEqual(SecurityEvent.objects.count(), 0)
+        self.assertEqual(HoneypotEvent.objects.count(), 0)
+        self.assertEqual(RiskSnapshot.objects.count(), 0)
+        self.assertIn("devre dışı", output.getvalue())
 
     def test_detection_services_only_analyze_supplied_data(self):
         self.assertEqual(len(detect_arp_anomalies([{"ip_address": "192.168.1.1", "mac_address": "aa"}, {"ip_address": "192.168.1.1", "mac_address": "bb"}])), 1)
         self.assertEqual(len(detect_arp_anomalies([{"ip_address": "192.168.1.10", "mac_address": "aa"}, {"ip_address": "192.168.1.11", "mac_address": "aa"}])), 1)
         self.assertEqual(len(detect_port_scan([{"source_ip": "192.168.1.2", "destination_port": port} for port in range(1, 9)])), 1)
         self.assertEqual(len(detect_bruteforce([{"source_ip": "192.168.1.3", "success": False}] * 5)), 1)
+        self.assertEqual(len(detect_dos_patterns([{"source_ip": "192.168.1.4", "destination_ip": "192.168.1.10", "destination_port": 443}] * 20)), 1)
 
     @override_settings(LOCAL_SUBNET="8.8.8.0/24")
     def test_public_subnet_is_rejected(self):
@@ -51,9 +62,15 @@ class DashboardMVPTests(TestCase):
             resolve_target_subnet()
 
     @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24", ENABLE_REAL_SCAN=True)
+    @patch("dashboard.services.network_scanner._scan_system_arp_table")
+    @patch("dashboard.services.network_scanner._scan_with_scapy")
+    @patch("dashboard.services.network_scanner._scan_with_nmap_ports")
     @patch("dashboard.services.network_scanner._scan_with_nmap")
-    def test_real_scan_updates_devices_without_port_scan(self, nmap_scan):
+    def test_real_scan_updates_devices_without_port_scan(self, nmap_scan, port_scan, scapy_scan, arp_scan):
         nmap_scan.return_value = ([{"ip_address": "192.168.50.10", "mac_address": "00:11:22:33:44:55", "hostname": None, "vendor": "Test"}], "nmap-ping")
+        port_scan.return_value = ([], "nmap-port")
+        scapy_scan.return_value = ([], "scapy-arp")
+        arp_scan.return_value = ([], "system-arp")
         result = scan_network()
         self.assertTrue(result["success"])
         self.assertTrue(Device.objects.filter(ip_address="192.168.50.10", status="online").exists())
@@ -70,12 +87,116 @@ class DashboardMVPTests(TestCase):
         self.assertNotContains(response, "192.168.60.10")
 
     @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24", ENABLE_REAL_SCAN=True)
+    @patch("dashboard.services.network_scanner._scan_system_arp_table")
+    @patch("dashboard.services.network_scanner._scan_with_scapy")
+    @patch("dashboard.services.network_scanner._scan_with_nmap_ports")
     @patch("dashboard.services.network_scanner._scan_with_nmap")
-    def test_real_scan_does_not_duplicate_new_device_alerts(self, nmap_scan):
+    def test_real_scan_does_not_duplicate_new_device_alerts(self, nmap_scan, port_scan, scapy_scan, arp_scan):
         nmap_scan.return_value = ([{"ip_address": "192.168.50.20", "mac_address": "00:11:22:33:44:77", "hostname": None, "vendor": "Test"}], "nmap-ping")
+        port_scan.return_value = ([], "nmap-port")
+        scapy_scan.return_value = ([], "scapy-arp")
+        arp_scan.return_value = ([], "system-arp")
         self.assertTrue(scan_network()["success"])
         self.assertTrue(scan_network()["success"])
+        run_security_analysis()
+        run_security_analysis()
         self.assertEqual(Alert.objects.filter(alert_type="new_device", source_ip="192.168.50.20", status="active").count(), 1)
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24", ENABLE_REAL_SCAN=True)
+    @patch("dashboard.services.network_scanner._scan_system_arp_table")
+    @patch("dashboard.services.network_scanner._scan_with_scapy")
+    @patch("dashboard.services.network_scanner._scan_with_nmap_ports")
+    @patch("dashboard.services.network_scanner._scan_with_nmap")
+    def test_partial_detected_device_is_saved_and_alerted(self, nmap_scan, port_scan, scapy_scan, arp_scan):
+        nmap_scan.return_value = ([{"ip_address": "192.168.50.60", "mac_address": None, "hostname": None, "vendor": "Bilinmiyor"}], "nmap-ping")
+        port_scan.return_value = ([], "nmap-port")
+        scapy_scan.return_value = ([], "scapy-arp")
+        arp_scan.return_value = ([], "system-arp")
+
+        result = scan_network()
+
+        self.assertTrue(result["success"])
+        device = Device.objects.get(ip_address="192.168.50.60")
+        self.assertEqual(device.status, "partial")
+        run_security_analysis()
+        alert = Alert.objects.get(alert_type="new_device", source_ip="192.168.50.60")
+        self.assertIn("MAC/vendor", alert.message)
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24", ENABLE_REAL_SCAN=True)
+    @patch("dashboard.services.network_scanner._scan_system_arp_table")
+    @patch("dashboard.services.network_scanner._scan_with_scapy")
+    @patch("dashboard.services.network_scanner._scan_with_nmap_ports")
+    @patch("dashboard.services.network_scanner._scan_with_nmap")
+    def test_port_scan_records_explained_open_ports(self, nmap_scan, port_scan, scapy_scan, arp_scan):
+        nmap_scan.return_value = ([], "nmap-ping")
+        port_scan.return_value = ([
+            {
+                "ip_address": "192.168.50.61",
+                "mac_address": None,
+                "hostname": None,
+                "vendor": "Bilinmiyor",
+                "open_ports": [
+                    {"port": 22, "protocol": "tcp", "service": "ssh"},
+                    {"port": 5432, "protocol": "tcp", "service": "postgresql"},
+                ],
+            }
+        ], "nmap-port")
+        scapy_scan.return_value = ([], "scapy-arp")
+        arp_scan.return_value = ([], "system-arp")
+
+        result = scan_network()
+
+        self.assertTrue(result["success"])
+        device = Device.objects.get(ip_address="192.168.50.61")
+        self.assertEqual(OpenPort.objects.filter(device=device).count(), 2)
+        self.assertEqual(Alert.objects.filter(source_ip=device.ip_address).count(), 0)
+        run_security_analysis()
+        self.assertEqual(SecurityEvent.objects.filter(event_type="open_port", destination_ip=device.ip_address).count(), 2)
+        self.assertTrue(Alert.objects.filter(alert_type="ssh_port_open", source_ip=device.ip_address).exists())
+        self.assertTrue(Alert.objects.filter(alert_type="database_port_open", source_ip=device.ip_address).exists())
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("dashboard:device_detail", args=[device.pk]))
+        self.assertContains(response, "Açık Portlar")
+        self.assertContains(response, "PostgreSQL")
+
+    def test_port_explanation_dictionary_returns_expected_fields(self):
+        ssh = get_port_explanation(22)
+        unknown = get_port_explanation(9999, "custom")
+
+        self.assertEqual(ssh["service"], "SSH")
+        self.assertEqual(ssh["risk_key"], "medium")
+        self.assertIn("uzaktan", ssh["description"])
+        self.assertEqual(unknown["service"], "CUSTOM")
+        self.assertIn("gerekmiyorsa", unknown["action"])
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24", ENABLE_REAL_SCAN=True)
+    @patch("dashboard.services.network_scanner._scan_system_arp_table")
+    @patch("dashboard.services.network_scanner._scan_with_scapy")
+    @patch("dashboard.services.network_scanner._scan_with_socket_ports")
+    @patch("dashboard.services.network_scanner._scan_with_nmap_ports")
+    @patch("dashboard.services.network_scanner._scan_with_nmap")
+    def test_socket_fallback_records_open_ports_when_nmap_port_scan_missing(self, nmap_scan, nmap_port_scan, socket_scan, scapy_scan, arp_scan):
+        nmap_scan.return_value = ([], "nmap-ping")
+        nmap_port_scan.side_effect = RuntimeError("Nmap bulunamadi.")
+        socket_scan.return_value = ([
+            {
+                "ip_address": "192.168.50.62",
+                "mac_address": None,
+                "hostname": None,
+                "vendor": "Bilinmiyor",
+                "open_ports": [{"port": 5432, "protocol": "tcp", "service": "", "source": "socket-fallback"}],
+            }
+        ], "socket-fallback")
+        scapy_scan.return_value = ([], "scapy-arp")
+        arp_scan.return_value = ([], "system-arp")
+
+        result = scan_network()
+
+        self.assertTrue(result["success"])
+        device = Device.objects.get(ip_address="192.168.50.62")
+        self.assertTrue(OpenPort.objects.filter(device=device, port=5432, source="socket-fallback").exists())
+        run_security_analysis()
+        self.assertTrue(Alert.objects.filter(alert_type="database_port_open", source_ip=device.ip_address).exists())
 
     @override_settings(ENABLE_HONEYPOT_LOGS=True)
     def test_honeypot_ingest_is_idempotent(self):
@@ -116,8 +237,11 @@ class DashboardMVPTests(TestCase):
             self.assertEqual(second["ignored"], 2)
             event = HoneypotEvent.objects.get(is_mock=False)
             self.assertEqual(event.source_ip, source_ip)
+            self.assertEqual(event.source_port, 53210)
             self.assertEqual(event.service, "ssh")
             self.assertEqual(event.destination_port, 2222)
+            self.assertEqual(event.source_type, "OpenCanary logu")
+            self.assertEqual(event.event_type, "auth_failure")
             self.assertEqual(event.username, "test")
             self.assertIn("PASSWORD", event.raw_data["logdata"])
             self.assertNotIn("sensitive-test-value", event.command)
@@ -142,13 +266,34 @@ class DashboardMVPTests(TestCase):
             self.assertEqual(HoneypotEvent.objects.count(), 0)
 
     @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_honeypot_listener_records_connection_and_analysis_creates_alerts(self):
+        for port in (2222, 8080, 2121):
+            record_honeypot_connection(
+                source_ip="192.168.50.90",
+                source_port=50000 + port,
+                destination_port=port,
+                payload="test connection",
+            )
+
+        result = run_security_analysis()
+
+        self.assertEqual(HoneypotEvent.objects.filter(source_type="Honeypot listener").count(), 3)
+        self.assertGreaterEqual(result["port"], 1)
+        self.assertTrue(Alert.objects.filter(alert_type="honeypot", source_ip="192.168.50.90").exists())
+        self.assertTrue(Alert.objects.filter(alert_type="port_scan", source_ip="192.168.50.90").exists())
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("dashboard:honeypot"))
+        self.assertContains(response, "Honeypot listener")
+        self.assertContains(response, "52222")
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
     def test_monitoring_cycle_runs_with_skip_options(self):
         output = StringIO()
         call_command("run_monitoring_cycle", "--skip-scan", "--skip-honeypot", stdout=output)
         text = output.getvalue()
         self.assertIn("Scan: atlandi", text)
         self.assertIn("Honeypot: atlandi", text)
-        self.assertIn("analysis: ARP=", text)
+        self.assertIn("analysis: new_devices=0, open_ports=0, ARP=", text)
         self.assertEqual(Device.objects.count(), 0)
         self.assertEqual(HoneypotEvent.objects.count(), 0)
         self.assertEqual(RiskSnapshot.objects.count(), 1)
@@ -206,9 +351,9 @@ class DashboardMVPTests(TestCase):
         self.assertContains(response, "Honeypot okunan/eklenen")
         self.assertContains(response, "1 duplicate")
         self.assertContains(response, "8 ignored")
-        self.assertContains(response, "Risk puanı")
+        self.assertContains(response, "Son cycle analiz skoru")
         self.assertContains(response, "Son Honeypot Olayları")
-        self.assertContains(response, "SSH bağlantı denemesi algılandı")
+        self.assertContains(response, "Honeypot bağlantı denemesi")
         self.assertContains(response, "Honeypot")
         self.assertContains(response, "Yeni bağlantı denemesi")
         self.assertContains(response, "192.168.50.40")
@@ -252,11 +397,17 @@ class DashboardMVPTests(TestCase):
         findings = analyze_ssh_attempt_logs(minutes=10)
 
         self.assertEqual(len(findings), 1)
-        self.assertTrue(Alert.objects.filter(alert_type="honeypot", title__icontains="SSH").exists())
+        self.assertTrue(Alert.objects.filter(alert_type="honeypot", title__icontains="Honeypot").exists())
         self.assertTrue(SecurityEvent.objects.filter(event_type="honeypot", protocol="SSH", source_ip="192.168.50.41").exists())
         self.client.force_login(self.user)
         response = self.client.get(reverse("dashboard:alerts"))
-        self.assertContains(response, "SSH bağlantı denemesi algılandı")
+        self.assertContains(response, "Honeypot bağlantı denemesi")
+        self.assertContains(response, "Ne oldu?")
+        self.assertContains(response, "Neden önemli?")
+        self.assertContains(response, "Ne yapmalıyım?")
+        self.assertContains(response, "Yanlış alarm olabilir mi?")
+        self.assertContains(response, "Kaynak veri türü")
+        self.assertContains(response, "OpenCanary logu")
 
     @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
     def test_honeypot_port_scan_and_bruteforce_analysis_create_alerts(self):
@@ -274,6 +425,90 @@ class DashboardMVPTests(TestCase):
         self.assertTrue(Alert.objects.filter(alert_type="brute_force", title__icontains="SSH").exists())
 
     @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_dos_analysis_creates_alert_from_safe_event_counts(self):
+        for index in range(5):
+            SecurityEvent.objects.create(
+                event_type="network",
+                source_ip="192.168.50.70",
+                destination_ip="192.168.50.10",
+                destination_port=443,
+                title=f"request {index}",
+                description="safe test event",
+                level="warning",
+            )
+
+        findings = analyze_dos_logs(threshold=5, minutes=10)
+
+        self.assertEqual(len(findings), 1)
+        self.assertTrue(Alert.objects.filter(alert_type="dos_suspected", source_ip="192.168.50.70").exists())
+        self.assertTrue(SecurityEvent.objects.filter(event_type="dos_suspected", source_ip="192.168.50.70").exists())
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_simulate_security_events_command_is_disabled(self):
+        output = StringIO()
+        call_command("simulate_security_events", stdout=output)
+
+        self.assertEqual(Device.objects.count(), 0)
+        self.assertEqual(Alert.objects.count(), 0)
+        self.assertEqual(SecurityEvent.objects.count(), 0)
+        self.assertEqual(HoneypotEvent.objects.count(), 0)
+        self.assertIn("devre dışı", output.getvalue())
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_risk_score_reasons_are_calculated(self):
+        device = Device.objects.create(ip_address="192.168.50.80", status="partial", is_trusted=False)
+        Alert.objects.create(device=device, alert_type="new_device", severity="medium", status="active", title="new", message="test", source_ip=device.ip_address)
+        Alert.objects.create(alert_type="brute_force", severity="high", status="active", title="brute", message="test", source_ip="192.168.50.81")
+
+        result = calculate_risk(include_reasons=True)
+
+        labels = {item["label"]: item["points"] for item in result["risk_reasons"]}
+        self.assertGreaterEqual(result["risk_score"], 48)
+        self.assertEqual(labels["Yeni cihaz tespit edildi"], 10)
+        self.assertEqual(labels["Brute-force şüphesi"], 30)
+        self.assertEqual(labels["Kısmen algılanmış cihaz"], 8)
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_clear_security_data_command_clears_only_security_tables(self):
+        device = Device.objects.create(ip_address="192.168.50.82", status="online")
+        OpenPort.objects.create(device=device, port=5432, protocol="tcp", service_name="postgresql")
+        Alert.objects.create(device=device, alert_type="new_device", severity="medium", title="new", message="test", source_ip=device.ip_address)
+        SecurityEvent.objects.create(event_type="open_port", title="port", description="test", destination_ip=device.ip_address, destination_port=5432)
+        HoneypotEvent.objects.create(source_ip="192.168.50.83", service="ssh", is_mock=False)
+        ArpObservation.objects.create(ip_address=device.ip_address, mac_address="00:11:22:33:44:55")
+        RiskSnapshot.objects.create(risk_level="medium", risk_score=40, security_score=60, active_alerts=1)
+        MonitoringCycleRun.objects.create(status="completed")
+        NetworkScan.objects.create(network_range="192.168.50.0/24", status="completed", is_mock=False)
+
+        output = StringIO()
+        call_command("clear_security_data", stdout=output)
+
+        self.assertEqual(Device.objects.count(), 0)
+        self.assertEqual(OpenPort.objects.count(), 0)
+        self.assertEqual(Alert.objects.count(), 0)
+        self.assertEqual(SecurityEvent.objects.count(), 0)
+        self.assertEqual(HoneypotEvent.objects.count(), 0)
+        self.assertEqual(ArpObservation.objects.count(), 0)
+        self.assertEqual(RiskSnapshot.objects.count(), 0)
+        self.assertEqual(MonitoringCycleRun.objects.count(), 0)
+        self.assertEqual(NetworkScan.objects.count(), 0)
+        self.assertTrue(get_user_model().objects.filter(username="demo").exists())
+        self.assertIn("Toplam silinen", output.getvalue())
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_settings_clear_security_data_requires_post_and_clears_selected_target(self):
+        self.client.force_login(self.user)
+        Alert.objects.create(alert_type="system", severity="low", title="test", message="test")
+
+        response = self.client.get(reverse("dashboard:clear_security_data"), {"target": "alerts"})
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(Alert.objects.count(), 1)
+
+        response = self.client.post(reverse("dashboard:clear_security_data"), {"target": "alerts"})
+        self.assertRedirects(response, reverse("dashboard:settings"))
+        self.assertEqual(Alert.objects.count(), 0)
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
     def test_arp_spoofing_analysis_creates_alert_from_existing_observations(self):
         findings = analyze_arp_observations([
             {"ip_address": "192.168.50.44", "mac_address": "00:11:22:33:44:55"},
@@ -282,6 +517,14 @@ class DashboardMVPTests(TestCase):
 
         self.assertEqual(len(findings), 1)
         self.assertTrue(Alert.objects.filter(alert_type="arp_spoof", title__icontains="ARP").exists())
+
+        Alert.objects.all().delete()
+        SecurityEvent.objects.all().delete()
+        ArpObservation.objects.create(ip_address="192.168.50.1", mac_address="00:11:22:33:44:aa", is_gateway=True)
+        ArpObservation.objects.create(ip_address="192.168.50.1", mac_address="00:11:22:33:44:bb", is_gateway=True)
+        findings = analyze_arp_observations()
+        self.assertEqual(len(findings), 1)
+        self.assertTrue(Alert.objects.filter(alert_type="arp_spoof", source_ip="192.168.50.1").exists())
 
     @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
     def test_reports_page_contains_chart_data_when_database_has_events(self):

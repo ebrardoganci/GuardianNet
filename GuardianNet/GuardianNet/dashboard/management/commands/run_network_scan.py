@@ -20,6 +20,9 @@ class Command(BaseCommand):
         SystemSetting.objects.update_or_create(key="last_network_scan", defaults={"value": timezone.now().isoformat(), "description": "Son ag kesfi"})
         message = result.get("message", "Tarama tamamlandi.")
         if result["success"]:
-            self.stdout.write(self.style.SUCCESS(f"{message} Cihaz: {result['found_devices']}"))
+            self.stdout.write(self.style.SUCCESS(
+                f"{message} Cihaz: {result['found_devices']}, yeni cihaz: {result.get('new_devices', 0)}, "
+                f"açık port: {result.get('open_ports', 0)}, yöntem: {result.get('method', '-')}"
+            ))
         else:
             self.stdout.write(self.style.WARNING(f"{message} Hata: {result.get('error', 'bilinmiyor')}"))
