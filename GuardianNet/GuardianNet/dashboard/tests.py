@@ -4,14 +4,12 @@ from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
-
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
-
-from .models import Alert, ArpObservation, Device, HoneypotEvent, MonitoringCycleRun, NetworkScan, OpenPort, RiskSnapshot, SecurityEvent
+from .models import Alert, ArpObservation, Device, HoneypotEvent, MonitoringCycleRun, NetworkScan, OpenPort, RiskSnapshot, SecurityEvent, SystemSetting
 from .security_explanations import get_port_explanation
 from .services.arp_monitor import analyze_arp_observations, detect_arp_anomalies
 from .services.bruteforce_detector import analyze_bruteforce_logs, analyze_ssh_attempt_logs, detect_bruteforce
@@ -67,9 +65,9 @@ class DashboardMVPTests(TestCase):
     @patch("dashboard.services.network_scanner._scan_with_nmap_ports")
     @patch("dashboard.services.network_scanner._scan_with_nmap")
     def test_real_scan_updates_devices_without_port_scan(self, nmap_scan, port_scan, scapy_scan, arp_scan):
-        nmap_scan.return_value = ([{"ip_address": "192.168.50.10", "mac_address": "00:11:22:33:44:55", "hostname": None, "vendor": "Test"}], "nmap-ping")
+        nmap_scan.return_value = ([{"ip_address": "192.168.50.10", "mac_address": None, "hostname": None, "vendor": "Test"}], "nmap-ping")
         port_scan.return_value = ([], "nmap-port")
-        scapy_scan.return_value = ([], "scapy-arp")
+        scapy_scan.return_value = ([{"ip_address": "192.168.50.10", "mac_address": "00:11:22:33:44:55", "hostname": None, "vendor": "Test"}], "scapy-arp")
         arp_scan.return_value = ([], "system-arp")
         result = scan_network()
         self.assertTrue(result["success"])
@@ -152,6 +150,7 @@ class DashboardMVPTests(TestCase):
         self.assertEqual(Alert.objects.filter(source_ip=device.ip_address).count(), 0)
         run_security_analysis()
         self.assertEqual(SecurityEvent.objects.filter(event_type="open_port", destination_ip=device.ip_address).count(), 2)
+        self.assertEqual(SecurityEvent.objects.get(event_type="open_port", destination_ip=device.ip_address, destination_port=22).protocol, "tcp")
         self.assertTrue(Alert.objects.filter(alert_type="ssh_port_open", source_ip=device.ip_address).exists())
         self.assertTrue(Alert.objects.filter(alert_type="database_port_open", source_ip=device.ip_address).exists())
         self.client.force_login(self.user)
@@ -197,6 +196,105 @@ class DashboardMVPTests(TestCase):
         self.assertTrue(OpenPort.objects.filter(device=device, port=5432, source="socket-fallback").exists())
         run_security_analysis()
         self.assertTrue(Alert.objects.filter(alert_type="database_port_open", source_ip=device.ip_address).exists())
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="172.20.10.0/28", ENABLE_REAL_SCAN=True)
+    @patch("dashboard.services.network_scanner._scan_system_arp_table")
+    @patch("dashboard.services.network_scanner._scan_with_scapy")
+    @patch("dashboard.services.network_scanner._scan_with_nmap_ports")
+    @patch("dashboard.services.network_scanner._scan_with_nmap")
+    def test_scan_excludes_network_and_broadcast_addresses(self, nmap_scan, port_scan, scapy_scan, arp_scan):
+        nmap_scan.return_value = ([
+            {"ip_address": "172.20.10.0", "mac_address": "00:11:22:33:44:00", "hostname": None, "vendor": "Test"},
+            {"ip_address": "172.20.10.1", "mac_address": "00:11:22:33:44:01", "hostname": None, "vendor": "Test"},
+            {"ip_address": "172.20.10.14", "mac_address": "00:11:22:33:44:14", "hostname": None, "vendor": "Test"},
+            {"ip_address": "172.20.10.15", "mac_address": "00:11:22:33:44:15", "hostname": None, "vendor": "Test"},
+        ], "nmap-ping")
+        port_scan.return_value = ([], "nmap-port")
+        scapy_scan.return_value = ([], "scapy-arp")
+        arp_scan.return_value = ([], "system-arp")
+
+        result = scan_network()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["found_devices"], 2)
+        self.assertFalse(Device.objects.filter(ip_address="172.20.10.0").exists())
+        self.assertTrue(Device.objects.filter(ip_address="172.20.10.1").exists())
+        self.assertTrue(Device.objects.filter(ip_address="172.20.10.14").exists())
+        self.assertFalse(Device.objects.filter(ip_address="172.20.10.15").exists())
+        self.assertEqual(NetworkScan.objects.first().devices_found, 2)
+
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("dashboard:index"))
+        self.assertEqual(response.context["last_scan_found_devices"], 2)
+        self.assertContains(response, "<strong>2</strong>", html=True)
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="172.20.10.0/28", ENABLE_REAL_SCAN=True)
+    @patch("dashboard.services.network_scanner._scan_system_arp_table")
+    @patch("dashboard.services.network_scanner._scan_with_scapy")
+    @patch("dashboard.services.network_scanner._scan_with_nmap_ports")
+    @patch("dashboard.services.network_scanner._scan_with_nmap")
+    def test_nmap_tcp_only_device_is_partial_and_warns_in_devices_ui(self, nmap_scan, port_scan, scapy_scan, arp_scan):
+        nmap_scan.return_value = ([], "nmap-ping")
+        port_scan.return_value = ([
+            {
+                "ip_address": "172.20.10.2",
+                "mac_address": None,
+                "hostname": None,
+                "vendor": "Bilinmiyor",
+                "open_ports": [{"port": 443, "protocol": "tcp", "service": "https", "source": "nmap-port"}],
+            }
+        ], "nmap-port")
+        scapy_scan.return_value = ([], "scapy-arp")
+        arp_scan.return_value = ([], "system-arp")
+
+        result = scan_network()
+
+        self.assertTrue(result["success"])
+        device = Device.objects.get(ip_address="172.20.10.2")
+        self.assertEqual(device.status, "partial")
+        self.assertFalse(Device.objects.filter(ip_address="172.20.10.2", status="online").exists())
+
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("dashboard:devices"))
+
+        self.assertContains(response, "Kısmen algılandı")
+        self.assertContains(response, "TCP/Nmap, kimlik doğrulanmadı")
+        self.assertContains(response, "Bu adres TCP cevabıyla algılandı; MAC/hostname doğrulanamadı.")
+        self.assertContains(response, "Bu port Nmap tarafından açık raporlandı; ancak cihaz kimliği doğrulanamadığı için hotspot/ağ geçidi cevabı olabilir.")
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="172.20.10.0/28")
+    def test_missing_mac_is_explained_in_devices_and_detail(self):
+        self.client.force_login(self.user)
+        device = Device.objects.create(ip_address="172.20.10.3", status="partial", vendor="Bilinmiyor")
+        OpenPort.objects.create(device=device, port=443, protocol="tcp", service_name="https", source="nmap-port")
+
+        response = self.client.get(reverse("dashboard:devices"))
+
+        self.assertContains(response, "Alınamadı")
+        self.assertContains(response, "ARP kaydı yok")
+        self.assertContains(response, "ARP tablosunda bu IP için MAC kaydı bulunamadı.")
+
+        detail = self.client.get(reverse("dashboard:device_detail", args=[device.pk]))
+
+        self.assertContains(detail, "Algılama kaynağı")
+        self.assertContains(detail, "TCP/Nmap")
+        self.assertContains(detail, "MAC kaynağı")
+        self.assertContains(detail, "Alınamadı")
+        self.assertContains(detail, "ARP tablosunda bu IP için MAC kaydı bulunamadı.")
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="172.20.10.0/28")
+    def test_trusted_arp_mac_is_displayed_with_source(self):
+        self.client.force_login(self.user)
+        device = Device.objects.create(ip_address="172.20.10.4", mac_address="00:11:22:33:44:55", status="online", vendor="Test")
+        ArpObservation.objects.create(ip_address=device.ip_address, mac_address=device.mac_address, source="scapy-arp")
+
+        response = self.client.get(reverse("dashboard:devices"))
+        detail = self.client.get(reverse("dashboard:device_detail", args=[device.pk]))
+
+        self.assertContains(response, "00:11:22:33:44:55")
+        self.assertNotContains(response, "ARP tablosunda bu IP için MAC kaydı bulunamadı.")
+        self.assertContains(detail, "Scapy ARP")
+        self.assertContains(detail, "00:11:22:33:44:55")
 
     @override_settings(ENABLE_HONEYPOT_LOGS=True)
     def test_honeypot_ingest_is_idempotent(self):
@@ -363,6 +461,122 @@ class DashboardMVPTests(TestCase):
         self.assertNotIn("latest_monitoring_cycle.started_at", content)
 
     @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_dashboard_explanation_texts_render(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("dashboard:index"))
+
+        self.assertContains(response, "Son taramada doğrulanmış cihaz.")
+        self.assertContains(response, "Daha önce görülmüş, son taramada doğrulanmamış.")
+        self.assertContains(response, "Henüz kapatılmamış uyarı.")
+        self.assertContains(response, "Monitoring cycle: Ağ taraması + honeypot log okuma + güvenlik analizi döngüsü.")
+        self.assertContains(response, "Son keşifte bulunan kullanılabilir host sayısı.")
+        self.assertContains(response, "Detayları göster")
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_dashboard_action_modal_texts_render(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("dashboard:index"))
+
+        self.assertContains(response, "Monitoring Cycle Başlatılıyor")
+        self.assertContains(response, "Ağdaki cihaz ve açık portlar taranıyor.")
+        self.assertContains(response, "Cihaz Keşfi Başlatılıyor")
+        self.assertContains(response, "Bu işlem yalnızca yerel ağdaki cihazları ve erişilebilir portları keşfeder.")
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_dashboard_honeypot_summary_explanations_render(self):
+        self.client.force_login(self.user)
+        MonitoringCycleRun.objects.create(
+            status="completed",
+            scan_status="completed",
+            honeypot_status="completed",
+            honeypot_read_lines=3,
+            honeypot_created_events=1,
+            honeypot_duplicates=1,
+            honeypot_parse_errors=1,
+            analysis_status="completed",
+            raw_summary={"honeypot": {"ignored": 1}},
+        )
+
+        response = self.client.get(reverse("dashboard:index"))
+
+        self.assertContains(response, "Duplicate: Daha önce eklenmiş kayıt.")
+        self.assertContains(response, "Ignored: Kapsam dışı veya işlenmeyen kayıt.")
+        self.assertContains(response, "Parse: Formatı okunamayan log kaydı.")
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_dashboard_security_events_show_open_port_fields(self):
+        self.client.force_login(self.user)
+        device = Device.objects.create(ip_address="192.168.50.51", status="online")
+        OpenPort.objects.create(device=device, port=22, protocol="tcp", service_name="ssh", source="nmap-port")
+        SecurityEvent.objects.create(
+            event_type="open_port",
+            source_ip=device.ip_address,
+            destination_ip=device.ip_address,
+            destination_port=22,
+            protocol="tcp",
+            title="Açık port",
+            description="test",
+            level="warning",
+            risk_score=40,
+        )
+
+        response = self.client.get(reverse("dashboard:index"))
+
+        self.assertContains(response, "Kaynak veri türü")
+        self.assertContains(response, "192.168.50.51")
+        self.assertContains(response, "22")
+        self.assertContains(response, "SSH")
+        self.assertContains(response, "tcp")
+        self.assertContains(response, "OpenPort kaydı / nmap-port")
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_devices_offline_explanation_renders(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("dashboard:devices"))
+
+        self.assertContains(response, "Offline cihazlar güvenlik geçmişi için saklanır.")
+        self.assertContains(response, "daha önce ağda görülmüş ancak son taramada aktif olarak doğrulanamamıştır.")
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_settings_subnet_and_scan_limit_explanations_render_and_save(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("dashboard:settings"))
+
+        self.assertContains(response, "Subnet değişikliğini net test etmek için eski cihaz kayıtlarını temizleyip yeniden tarama yapın.")
+        self.assertContains(response, "Scan limit aktif tarama hedeflerini sınırlar; ARP tablosundan görülen cihazlar ayrıca görünebilir.")
+        self.assertContains(response, 'name="monitoring_cycle_scan_limit"')
+        self.assertContains(response, "Ağ Ayarları")
+        self.assertContains(response, "Tarama Motorları")
+        self.assertContains(response, "Honeypot / OpenCanary")
+        self.assertContains(response, "Son Çalışma Bilgileri")
+        self.assertContains(response, "Veri Yönetimi")
+
+        response = self.client.post(reverse("dashboard:settings"), {
+            "local_subnet": "192.168.50.0/24",
+            "monitoring_cycle_scan_limit": "12",
+            "scan_interval_seconds": "300",
+            "opencanary_log_path": "",
+            "enable_real_scan": "on",
+            "enable_honeypot_logs": "on",
+        })
+
+        self.assertRedirects(response, reverse("dashboard:settings"))
+        self.assertEqual(SystemSetting.objects.get(key="monitoring_cycle_scan_limit").value, "12")
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
+    def test_honeypot_page_uses_short_presentation_text(self):
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("dashboard:honeypot"))
+
+        self.assertContains(response, "Honeypot, gerçek servis yerine sahte servisleri dinleyerek bağlantı denemelerini kaydeder.")
+        self.assertContains(response, "Kaynak Veri Türü")
+
+    @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
     @patch("dashboard.services.monitoring_cycle.run_security_analysis")
     @patch("dashboard.services.monitoring_cycle.ingest_honeypot_logs")
     @patch("dashboard.services.monitoring_cycle.scan_network")
@@ -408,6 +622,9 @@ class DashboardMVPTests(TestCase):
         self.assertContains(response, "Yanlış alarm olabilir mi?")
         self.assertContains(response, "Kaynak veri türü")
         self.assertContains(response, "OpenCanary logu")
+        self.assertContains(response, "Detayları göster")
+        self.assertContains(response, "SSH brute-force")
+        self.assertContains(response, "ARP spoofing")
 
     @override_settings(GUARDIANNET_MODE="real", LOCAL_SUBNET="192.168.50.0/24")
     def test_honeypot_port_scan_and_bruteforce_analysis_create_alerts(self):

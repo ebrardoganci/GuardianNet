@@ -10,7 +10,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from .models import Alert, Device, HoneypotEvent, MonitoringCycleRun, NetworkScan, OpenPort, RiskSnapshot, SecurityEvent, SystemSetting
+from .models import Alert, ArpObservation, Device, HoneypotEvent, MonitoringCycleRun, NetworkScan, OpenPort, RiskSnapshot, SecurityEvent, SystemSetting
 from .security_explanations import get_alert_explanation, get_port_explanation
 from .services.honeypot_manager import get_honeypot_status
 from .services.monitoring_cycle import run_monitoring_cycle as execute_monitoring_cycle
@@ -45,6 +45,13 @@ ALERT_STATUS_FILTERS = {
     "resolved": "Resolved",
 }
 ALERT_ACTION_STATUSES = {"active", "acknowledged", "resolved"}
+NETWORK_PROTOCOLS = {"tcp", "udp", "icmp"}
+TCP_IDENTITY_NOTE = "Bu adres TCP cevabıyla algılandı; MAC/hostname doğrulanamadı."
+TCP_IDENTITY_SHORT_NOTE = "TCP/Nmap, kimlik doğrulanmadı"
+NMAP_PORT_UNCERTAINTY_NOTE = "Bu port Nmap tarafından açık raporlandı; ancak cihaz kimliği doğrulanamadığı için hotspot/ağ geçidi cevabı olabilir."
+MAC_UNAVAILABLE_LABEL = "Alınamadı"
+MAC_UNAVAILABLE_NOTE = "ARP tablosunda bu IP için MAC kaydı bulunamadı."
+MAC_UNAVAILABLE_SHORT_NOTE = "ARP kaydı yok"
 
 
 def _monitoring_scan_limit_default():
@@ -107,7 +114,75 @@ def _latest_real_scan():
     return NetworkScan.objects.filter(is_mock=False, status="completed").order_by("-started_at").first()
 
 
+def _has_verified_identity(device):
+    return bool(_trusted_mac_observation(device) or device.hostname or (device.vendor and device.vendor != "Bilinmiyor"))
+
+
+def _mac_source_label(source):
+    normalized = str(source or "").lower()
+    if "scapy-arp" in normalized:
+        return "Scapy ARP"
+    if "system-arp" in normalized:
+        return "System ARP"
+    if normalized == "arp" or "arp gözlemi" in normalized:
+        return "ARP"
+    return ""
+
+
+def _trusted_mac_observation(device):
+    if not device.mac_address:
+        return None
+    observations = ArpObservation.objects.filter(
+        ip_address=device.ip_address,
+        mac_address=device.mac_address,
+    ).order_by("-observed_at")
+    for observation in observations:
+        if _mac_source_label(observation.source):
+            return observation
+    return None
+
+
+def _mac_display(device):
+    observation = _trusted_mac_observation(device)
+    if observation:
+        return {
+            "value": device.mac_address,
+            "source": _mac_source_label(observation.source),
+            "note": "",
+            "short_note": "",
+        }
+    return {
+        "value": MAC_UNAVAILABLE_LABEL,
+        "source": MAC_UNAVAILABLE_LABEL,
+        "note": MAC_UNAVAILABLE_NOTE,
+        "short_note": MAC_UNAVAILABLE_SHORT_NOTE,
+    }
+
+
+def _detection_source(device):
+    port_sources = set(OpenPort.objects.filter(device=device).values_list("source", flat=True))
+    if "nmap-port" in port_sources:
+        return "TCP/Nmap"
+    if "socket-fallback" in port_sources:
+        return "TCP/Socket fallback"
+    observation_sources = " ".join(ArpObservation.objects.filter(ip_address=device.ip_address).values_list("source", flat=True)).lower()
+    if "scapy-arp" in observation_sources:
+        return "ARP/Scapy"
+    if "system-arp" in observation_sources:
+        return "System ARP"
+    return "Ağ taraması"
+
+
+def _is_unverified_nmap_tcp_device(device):
+    return (
+        device.status == "partial"
+        and not _has_verified_identity(device)
+        and OpenPort.objects.filter(device=device, source="nmap-port").exists()
+    )
+
+
 def _device_open_port_rows(device):
+    unverified_nmap_tcp = _is_unverified_nmap_tcp_device(device)
     ports_qs = OpenPort.objects.filter(device=device).order_by("port")
     rows_by_port = {}
     for open_port in ports_qs:
@@ -123,8 +198,49 @@ def _device_open_port_rows(device):
             "action": explanation["action"],
             "source": open_port.source or "Gerçek ağ taraması",
             "last_seen": open_port.last_seen,
+            "uncertainty_note": NMAP_PORT_UNCERTAINTY_NOTE if unverified_nmap_tcp and open_port.source == "nmap-port" else "",
         }
     return [rows_by_port[key] for key in sorted(rows_by_port)]
+
+
+def _open_port_event_rows(events):
+    rows = []
+    for event in events:
+        row = {
+            "event": event,
+            "ip": event.source_ip or event.destination_ip or "-",
+            "port": "-",
+            "service": "-",
+            "protocol": event.protocol or "-",
+            "source_data_type": event.get_event_type_display(),
+        }
+        if event.event_type == "open_port":
+            ip_address = event.destination_ip or event.source_ip
+            open_port = None
+            if ip_address and event.destination_port:
+                open_port = (
+                    OpenPort.objects.filter(device__ip_address=ip_address, port=event.destination_port)
+                    .order_by("-last_seen")
+                    .first()
+                )
+            raw_protocol = (open_port.protocol if open_port else event.protocol or "").lower()
+            protocol = raw_protocol if raw_protocol in NETWORK_PROTOCOLS else ""
+            service_hint = ""
+            if open_port and open_port.service_name:
+                service_hint = open_port.service_name
+            elif event.protocol and event.protocol.lower() not in NETWORK_PROTOCOLS:
+                service_hint = event.protocol
+            service = get_port_explanation(event.destination_port, service_hint)["service"] if event.destination_port else service_hint.upper()
+            source = open_port.source if open_port else ""
+            row.update({
+                "ip": ip_address or "-",
+                "port": event.destination_port or "-",
+                "service": service or "-",
+                "protocol": protocol or "-",
+                "source_data_type": f"OpenPort kaydı / {source or 'Güvenlik analizi'}",
+            })
+        rows.append(row)
+    return rows
 
 
 def _inventory_rows(devices_qs):
@@ -137,9 +253,13 @@ def _inventory_rows(devices_qs):
         has_new_alert = new_alerts_qs.filter(Q(device=device) | Q(source_ip=device.ip_address)).exists()
         rows.append({
             "device": device,
+            "mac": _mac_display(device),
+            "detection_source": _detection_source(device),
             "seen_in_last_scan": device.status in {"online", "partial"} and latest_scan is not None,
             "active_alert_count": device_alerts.count(),
             "is_new": has_new_alert or (latest_scan is not None and device.first_seen >= latest_scan.started_at),
+            "identity_note": TCP_IDENTITY_NOTE if _is_unverified_nmap_tcp_device(device) else "",
+            "identity_short_note": TCP_IDENTITY_SHORT_NOTE if _is_unverified_nmap_tcp_device(device) else "",
             "open_ports": _device_open_port_rows(device),
         })
     return rows
@@ -171,6 +291,7 @@ def index(request):
     latest_cycle = MonitoringCycleRun.objects.first()
     latest_analysis = RiskSnapshot.objects.first()
     recent_honeypot_events = list(honeypot_qs[:5])
+    recent_events = list(events_qs[:6])
     has_recent_ssh_honeypot_event = any(event.service == "ssh" for event in recent_honeypot_events)
     active_alerts_count = (
         real_alerts(Alert.objects.filter(status="active")).count()
@@ -183,7 +304,7 @@ def index(request):
         "last_scan_found_devices": latest_scan.devices_found if latest_scan else None,
         "latest_scan": latest_scan,
         "active_alerts": active_alerts_count,
-        "recent_events": events_qs[:6], "recent_alerts": alerts_qs[:6],
+        "recent_events": recent_events, "recent_event_rows": _open_port_event_rows(recent_events), "recent_alerts": alerts_qs[:6],
         "recent_honeypot_events": recent_honeypot_events,
         "has_recent_ssh_honeypot_event": has_recent_ssh_honeypot_event,
         "honeypot_status": get_honeypot_status(),
@@ -213,9 +334,9 @@ def run_monitoring_cycle_view(request):
     if result["status"] == "completed":
         messages.success(request, message)
     elif result["status"] == "partial":
-        messages.warning(request, f"{message} Kismi hata: {result['error_summary']}")
+        messages.warning(request, f"{message} Bazı adımlar tamamlanamadı; sistem ayarlarını kontrol edin.")
     else:
-        messages.error(request, f"Monitoring cycle basarisiz. {result['error_summary'] or message}")
+        messages.error(request, "İşlem tamamlanamadı. Terminal çıktısını veya sistem ayarlarını kontrol edin.")
     return redirect("dashboard:index")
 
 
@@ -250,6 +371,8 @@ def device_detail(request, pk):
     return render(request, "dashboard/device_detail.html", {
         "device": device,
         "inventory": row,
+        "mac": _mac_display(device),
+        "detection_source": _detection_source(device),
         "alerts": alerts_qs,
         "events": events_qs,
         "open_port_rows": _device_open_port_rows(device),
@@ -372,14 +495,22 @@ def honeypot(request):
 @login_required
 def settings_view(request):
     if request.method == "POST":
+        raw_scan_limit = request.POST.get("monitoring_cycle_scan_limit", "").strip()
+        try:
+            scan_limit_value = str(_parse_scan_limit(raw_scan_limit)) if raw_scan_limit else ""
+        except ValueError as exc:
+            messages.error(request, str(exc))
+            return redirect("dashboard:settings")
         values = {
             "guardiannet_mode": "real",
-            "local_subnet": request.POST.get("local_subnet", "").strip(),
             "scan_interval_seconds": request.POST.get("scan_interval_seconds", "300"),
+            "monitoring_cycle_scan_limit": scan_limit_value,
             "opencanary_log_path": request.POST.get("opencanary_log_path", "").strip() or get_value("opencanary_log_path", ""),
             "enable_real_scan": "true" if request.POST.get("enable_real_scan") else "false",
             "enable_honeypot_logs": "true" if request.POST.get("enable_honeypot_logs") else "false",
         }
+        if not getattr(settings, "LOCAL_SUBNET_ENV", None):
+            values["local_subnet"] = request.POST.get("local_subnet", "").strip()
         for key, value in values.items():
             SystemSetting.objects.update_or_create(key=key, defaults={"value": value, "description": "GuardianNet calisma ayari"})
         messages.success(request, "Ayar kaydedildi.")
@@ -395,8 +526,9 @@ def settings_view(request):
         last_scan_qs = last_scan_qs.filter(is_mock=False)
     return render(request, "dashboard/settings.html", {
         "guardiannet_mode": mode,
-        "local_subnet": settings.LOCAL_SUBNET or get_value("local_subnet", ""), "used_subnet": used_subnet,
+        "local_subnet": get_value("local_subnet", ""), "local_subnet_locked": bool(getattr(settings, "LOCAL_SUBNET_ENV", None)), "used_subnet": used_subnet,
         "scan_interval_seconds": get_value("scan_interval_seconds", "300"),
+        "monitoring_cycle_scan_limit": _monitoring_scan_limit_default(),
         "enable_real_scan": get_bool("enable_real_scan", True),
         "enable_honeypot_logs": get_bool("enable_honeypot_logs", True),
         "opencanary_log_path": get_value("opencanary_log_path", ""),
@@ -429,5 +561,5 @@ def scan_network_view(request):
         if result["success"]:
             messages.success(request, f"Yerel cihaz kesfi tamamlandi. {result['found_devices']} cihaz bulundu.")
         else:
-            messages.warning(request, f"Gercek kesif yapilamadi; guvenlik verisi uretilmedi. {result.get('error', '')}")
+            messages.warning(request, "İşlem tamamlanamadı. Terminal çıktısını veya sistem ayarlarını kontrol edin.")
     return redirect("dashboard:index")

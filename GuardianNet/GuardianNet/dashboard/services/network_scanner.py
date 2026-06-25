@@ -147,6 +147,10 @@ def _scan_targets(network, limit=None):
     return targets
 
 
+def _usable_host_set(network):
+    return {str(host) for host in network.hosts()}
+
+
 def _scan_with_nmap(targets):
     executable = shutil.which("nmap")
     if not executable:
@@ -298,6 +302,21 @@ def _normalize_mac(value):
     return str(value).strip().replace("-", ":").lower()
 
 
+def _is_trusted_mac_source(source):
+    normalized = str(source or "").lower()
+    return "scapy-arp" in normalized or "system-arp" in normalized or normalized == "arp"
+
+
+def _has_trusted_mac_observation(ip_address, mac_address):
+    mac_address = _normalize_mac(mac_address)
+    if not ip_address or not mac_address:
+        return False
+    for observation in ArpObservation.objects.filter(ip_address=ip_address, mac_address=mac_address):
+        if _is_trusted_mac_source(observation.source):
+            return True
+    return False
+
+
 def _scan_system_arp_table():
     executable = shutil.which("arp")
     if not executable:
@@ -350,7 +369,7 @@ def _merge_discovered_records(collections):
                 "sources": [],
             })
             mac_address = _normalize_mac(data.get("mac_address"))
-            if mac_address:
+            if mac_address and _is_trusted_mac_source(method):
                 record["mac_address"] = mac_address
             if data.get("hostname") and not record.get("hostname"):
                 record["hostname"] = data["hostname"]
@@ -375,7 +394,7 @@ def _enrich_with_previous_records(network, discovered):
         device = previous.get(data["ip_address"])
         if not device:
             continue
-        if not data.get("mac_address") and device.mac_address:
+        if not data.get("mac_address") and device.mac_address and _has_trusted_mac_observation(device.ip_address, device.mac_address):
             data["previous_mac_address"] = device.mac_address
             data["mac_address"] = device.mac_address
             data["identity_from_previous"] = True
@@ -423,13 +442,15 @@ def _record_open_ports(device, open_ports):
 
 
 def _record_devices(network, discovered):
+    usable_hosts = _usable_host_set(network)
     active_ips = []
     new_count = 0
     open_port_count = 0
     for data in discovered:
         ip_address = data["ip_address"]
         try:
-            if ipaddress.ip_address(ip_address) not in network:
+            ipaddress.ip_address(ip_address)
+            if ip_address not in usable_hosts:
                 continue
         except ValueError:
             continue
@@ -444,7 +465,8 @@ def _record_devices(network, discovered):
             and not data.get("identity_from_previous")
         )
         partial = not has_current_identity
-        mac_address = current_mac or (previous.mac_address if previous else None)
+        previous_mac = previous.mac_address if previous and _has_trusted_mac_observation(ip_address, previous.mac_address) else None
+        mac_address = current_mac or previous_mac
         hostname = data.get("hostname") if data.get("hostname") is not None else (previous.hostname if previous else None)
         vendor = current_vendor if current_vendor and current_vendor != "Bilinmiyor" else (previous.vendor if previous and previous.vendor else "Bilinmiyor")
         device, created = Device.objects.update_or_create(

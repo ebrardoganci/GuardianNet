@@ -2,17 +2,11 @@
 {% block title %}Honeypot | GuardianNet{% endblock %}
 {% block content %}
 <h1>Honeypot</h1>
-<p>OpenCanary sahte servislerine gelen erişim denemeleri.</p>
+<p>Honeypot, gerçek servis yerine sahte servisleri dinleyerek bağlantı denemelerini kaydeder. Bu sayede şüpheli davranışlar gerçek sisteme zarar vermeden analiz edilir.</p>
 
 <section class="panel">
   <h2>Honeypot Nedir?</h2>
-  <p>
-    Honeypot gerçek sistem değildir. Saldırganın gerçek zannettiği sahte servistir.
-    GuardianNet sahte SSH, sahte Web ve sahte FTP servislerine gelen bağlantıları kayıt
-    altına alır. Bu bağlantılar daha sonra analiz edilerek honeypot bağlantısı, port
-    tarama şüphesi veya brute-force şüphesi gibi uyarılara dönüştürülür.
-  </p>
-  <p>Akış: OpenCanary log üretir, `ingest_honeypot_logs` kayıtları içeri alır, `analyze_security` uyarıları üretir.</p>
+  <p>Akış: OpenCanary veya listener kayıt üretir, GuardianNet kayıtları içeri alır ve güvenlik analizi uyarıları üretir.</p>
 </section>
 
 <div class="stats">

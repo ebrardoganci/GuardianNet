@@ -13,7 +13,7 @@
     </p>
   </div>
   <div>
-    <form method="post" action="{% url 'dashboard:run_monitoring_cycle' %}">
+    <form method="post" action="{% url 'dashboard:run_monitoring_cycle' %}" data-processing-title="Monitoring Cycle Başlatılıyor" data-processing-body="Bu işlem bir tam güvenlik kontrol döngüsü çalıştırır. Sırasıyla yerel ağ taraması yapılır, honeypot logları okunur ve güvenlik analizi çalıştırılarak uyarı/risk durumu güncellenir. İşlem birkaç saniye sürebilir." data-processing-steps="Ağdaki cihaz ve açık portlar taranıyor.|Honeypot logları okunuyor.|Güvenlik olayları analiz ediliyor.|Risk skoru ve uyarılar güncelleniyor.">
       {% csrf_token %}
       <label
         >Scan limit
@@ -27,7 +27,7 @@
       </label>
       <button type="submit">Monitoring Cycle Çalıştır</button>
     </form>
-    <form method="post" action="{% url 'dashboard:scan_network' %}">
+    <form method="post" action="{% url 'dashboard:scan_network' %}" data-processing-title="Cihaz Keşfi Başlatılıyor" data-processing-body="Bu işlem yalnızca yerel ağdaki cihazları ve erişilebilir portları keşfeder. Uyarı ve risk üretimi için ayrıca güvenlik analizi gerekir. Monitoring Cycle ise tarama + honeypot okuma + analiz işlemlerini birlikte çalıştırır.">
       {% csrf_token %}
       <button type="submit">Cihaz Keşfini Çalıştır</button>
     </form>
@@ -45,10 +45,12 @@
   <article>
     <span>Online Cihaz</span><strong>{{ online_devices }}</strong
     ><small>Toplam {{ total_devices }}</small>
+    <small>Son taramada doğrulanmış cihaz.</small>
   </article>
   <article>
     <span>Offline Cihaz</span><strong>{{ offline_devices }}</strong
     ><small>Kullanılan subnet içinde</small>
+    <small>Daha önce görülmüş, son taramada doğrulanmamış.</small>
   </article>
   <article>
     <span>Eksik Bilgili Cihaz</span><strong>{{ partial_devices }}</strong
@@ -58,15 +60,17 @@
     <span>Son Taramada Bulunan</span
     ><strong>{{ last_scan_found_devices|default:'-' }}</strong
     ><small>{% if latest_monitoring_cycle %}Cycle {{ latest_monitoring_cycle.started_at|date:"d.m H:i" }}{% else %}Henüz cycle yok{% endif %}</small>
+    <small>Son keşifte bulunan kullanılabilir host sayısı.</small>
   </article>
   <article>
     <span>Aktif Uyarı</span><strong>{{ active_alerts }}</strong>
+    <small>Henüz kapatılmamış uyarı.</small>
   </article>
   <article>
     <span>Risk Seviyesi</span
     ><strong class="risk-{{ risk_level }}"
       >{{ risk_level|upper }} · {{ risk_score }}</strong
-    ><small>Güvenlik {{ security_score }}/100</small>
+    ><small>Son analiz risk skoru. Güvenlik {{ security_score }}/100</small>
   </article>
   <article>
     <span>Honeypot</span><strong>{{ honeypot_status.label }}</strong
@@ -75,17 +79,12 @@
 </div>
 
 <section class="panel">
-  <h2>Ağ Taraması Nedir?</h2>
-  <p>
-    GuardianNet, Nmap'i ağdaki cihazları ve belirli açık portları bulmak için kullanır.
-    Port, cihazdaki bir servis kapısı gibi düşünülebilir: web paneli, dosya paylaşımı
-    veya uzaktan yönetim gibi servisler bu kapılardan cevap verir.
-  </p>
-  <p>
-    Açık port tek başına saldırı değildir. Ancak gereksiz açık portlar, özellikle zayıf
-    parola veya yanlış yapılandırma varsa, risk oluşturabilir. Bu yüzden port taraması
-    hangi servislerin erişilebilir olduğunu sade şekilde göstermek için yapılır.
-  </p>
+  <h2>Ağ Taraması Özeti</h2>
+  <p>GuardianNet yerel ağdaki kullanılabilir hostları ve seçili açık portları gösterir.</p>
+  <details>
+    <summary>Detayları göster</summary>
+    <p>Açık port tek başına saldırı değildir. Gereksiz açık portlar, zayıf parola veya yanlış yapılandırma varsa risk oluşturabilir.</p>
+  </details>
 </section>
 
 <section class="panel">
@@ -129,6 +128,7 @@
 
 <section class="panel">
   <h2>Son Monitoring Cycle</h2>
+  <p>Monitoring cycle: Ağ taraması + honeypot log okuma + güvenlik analizi döngüsü.</p>
   {% if latest_monitoring_cycle %}
   <div class="stats">
     <article>
@@ -150,6 +150,8 @@
       <span>Honeypot okunan/eklenen</span>
       <strong>{{ latest_monitoring_cycle.honeypot_read_lines }} / {{ latest_monitoring_cycle.honeypot_created_events }}</strong>
       <small>{{ latest_monitoring_cycle.honeypot_duplicates }} duplicate · {{ latest_monitoring_cycle.honeypot_ignored_lines }} ignored · {{ latest_monitoring_cycle.honeypot_parse_errors }} parse</small>
+      <small>Okunan: Log dosyasından okunan kayıt sayısı. Eklenen: İlk kez veritabanına eklenen olay sayısı.</small>
+      <small>Duplicate: Daha önce eklenmiş kayıt. Ignored: Kapsam dışı veya işlenmeyen kayıt. Parse: Formatı okunamayan log kaydı.</small>
     </article>
     <article>
       <span>Son cycle analiz skoru</span>
@@ -232,26 +234,34 @@
         <thead>
           <tr>
             <th>Olay</th>
-            <th>Kaynak</th>
+            <th>IP</th>
+            <th>Port</th>
+            <th>Servis</th>
+            <th>Protokol</th>
+            <th>Kaynak veri türü</th>
             <th>Risk</th>
             <th>Zaman</th>
           </tr>
         </thead>
         <tbody>
-          {% for event in recent_events %}
+          {% for row in recent_event_rows %}
           <tr>
-            <td>{{ event.get_event_type_display }}</td>
-            <td>{{ event.source_ip|default:'-' }}</td>
+            <td>{{ row.event.get_event_type_display }}</td>
+            <td>{{ row.ip }}</td>
+            <td>{{ row.port }}</td>
+            <td>{{ row.service }}</td>
+            <td>{{ row.protocol }}</td>
+            <td>{{ row.source_data_type }}</td>
             <td>
-              <span class="badge severity-{{ event.level }}"
-                >{{ event.risk_score }}</span
+              <span class="badge severity-{{ row.event.level }}"
+                >{{ row.event.risk_score }}</span
               >
             </td>
-            <td>{{ event.created_at|date:'d.m H:i' }}</td>
+            <td>{{ row.event.created_at|date:'d.m H:i' }}</td>
           </tr>
           {% empty %}
           <tr>
-            <td colspan="4">Güvenlik olayı yok.</td>
+            <td colspan="8">Güvenlik olayı yok.</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -298,4 +308,11 @@
     }
   }, 60000);
 </script>
+<div class="modal-overlay" id="processing-modal" hidden>
+  <div class="modal-card">
+    <h2 id="processing-title">İşlem başlatılıyor</h2>
+    <p id="processing-body">İşlem birkaç saniye sürebilir.</p>
+    <ol id="processing-steps"></ol>
+  </div>
+</div>
 {% endblock %}

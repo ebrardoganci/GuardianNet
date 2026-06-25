@@ -68,20 +68,41 @@ def analyze_open_ports():
             f"{device.ip_address}:{open_port.port} açık görünüyor. {explanation['description']} "
             f"Öneri: {explanation['action']} Kaynak: {open_port.source or 'Gerçek ağ taraması'}."
         )
-        security_event, _ = SecurityEvent.objects.get_or_create(
+        security_event = SecurityEvent.objects.filter(
             event_type="open_port",
             destination_ip=device.ip_address,
             destination_port=open_port.port,
-            protocol=service,
-            defaults={
+        ).first()
+        if security_event:
+            changed_fields = []
+            updates = {
                 "source_ip": device.ip_address,
                 "source_mac": device.mac_address or "",
                 "title": f"Açık port tespit edildi: {device.ip_address}:{open_port.port}",
                 "description": description,
                 "level": level,
+                "protocol": open_port.protocol,
                 "risk_score": _open_port_risk_score(risk_key),
-            },
-        )
+            }
+            for field_name, value in updates.items():
+                if getattr(security_event, field_name) != value:
+                    setattr(security_event, field_name, value)
+                    changed_fields.append(field_name)
+            if changed_fields:
+                security_event.save(update_fields=changed_fields)
+        else:
+            security_event = SecurityEvent.objects.create(
+                event_type="open_port",
+                destination_ip=device.ip_address,
+                destination_port=open_port.port,
+                protocol=open_port.protocol,
+                source_ip=device.ip_address,
+                source_mac=device.mac_address or "",
+                title=f"Açık port tespit edildi: {device.ip_address}:{open_port.port}",
+                description=description,
+                level=level,
+                risk_score=_open_port_risk_score(risk_key),
+            )
         alert = None
         if risk_key != "low":
             alert_type = alert_type_for_open_port(open_port.port)

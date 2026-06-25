@@ -3,6 +3,7 @@
 {% block content %}
 <h1>Cihazlar</h1>
 <p>Yetkili veri kaynaklarından gözlemlenen ağ varlıkları.</p>
+<p>Offline cihazlar güvenlik geçmişi için saklanır. Bu cihazlar daha önce ağda görülmüş ancak son taramada aktif olarak doğrulanamamıştır.</p>
 <section class="panel">
   <div class="table-wrap">
     <table>
@@ -34,13 +35,17 @@
         {% for row in device_rows %}
         <tr>
           <td><a href="{% url 'dashboard:device_detail' row.device.pk %}">{{ row.device.ip_address }}</a></td>
-          <td>{{ row.device.mac_address|default:'-' }}</td>
+          <td>
+            <span title="{% if row.mac.note %}{{ row.mac.note }}{% endif %}">{{ row.mac.value }}</span>
+            {% if row.mac.short_note %}<small class="muted" title="{{ row.mac.note }}">{{ row.mac.short_note }}</small>{% endif %}
+          </td>
           <td>{{ row.device.hostname|default:'-' }}</td>
           <td>{{ row.device.vendor|default:'-' }}</td>
           <td><span class="badge status-{{ row.device.status }}">{{ row.device.get_status_display }}</span></td>
           <td>
             {% if row.device.status == "partial" %}
-            <span class="badge severity-warning">Eksik bilgi</span>
+            <span class="badge severity-warning" title="{% if row.identity_note %}{{ row.identity_note }}{% endif %}">Eksik bilgi</span>
+            {% if row.identity_short_note %}<small class="muted" title="{{ row.identity_note }}">{{ row.identity_short_note }}</small>{% endif %}
             {% elif row.is_new or not row.device.is_trusted %}
             <span class="badge severity-warning">Yeni/bilinmeyen cihaz</span>
             {% else %}
@@ -52,6 +57,7 @@
             <div>
               <span class="badge severity-{{ port.risk_key }}">{{ port.port }} {{ port.service }}</span>
               <small>{{ port.description }} Öneri: {{ port.action }}</small>
+              {% if port.uncertainty_note %}<small>{{ port.uncertainty_note }}</small>{% endif %}
             </div>
             {% empty %}
             -

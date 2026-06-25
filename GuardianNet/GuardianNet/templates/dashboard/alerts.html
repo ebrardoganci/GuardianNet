@@ -5,7 +5,25 @@
 <p>Savunma amaçlı tespit ve inceleme kayıtları.</p>
 
 <section class="panel">
-  <form method="get">
+  <h2>Filtreler</h2>
+  <div class="filter-pills">
+    <a href="?status=all&severity=all&type=all">Tümü</a>
+    <a href="?status=active&severity=all&type=all">Aktif</a>
+    <a href="?status=acknowledged&severity=all&type=all">İncelendi</a>
+    <a href="?status=resolved&severity=all&type=all">Çözüldü</a>
+    <a href="?status=all&severity=medium&type=all">Orta</a>
+    <a href="?status=all&severity=high&type=all">Yüksek</a>
+    <a href="?status=all&severity=critical&type=all">Kritik</a>
+    <a href="?status=all&severity=all&type=honeypot">Honeypot</a>
+    <a href="?status=all&severity=all&type=new_device">Ağ taraması</a>
+    <a href="?status=all&severity=all&type=new_device">Yeni cihaz</a>
+    <a href="?status=all&severity=all&type=risky_port">Açık port</a>
+    <a href="?status=all&severity=all&type=port_scan">Port scan</a>
+    <a href="?status=all&severity=all&type=brute_force">SSH brute-force</a>
+    <a href="?status=all&severity=all&type=arp_spoof">ARP spoofing</a>
+    <a href="?status=all&severity=all&type=dos_suspected">DoS</a>
+  </div>
+  <form class="inline-form" method="get">
     <label>Durum
       <select name="status">
         {% for key, label in status_filters.items %}
@@ -33,62 +51,49 @@
   </form>
 </section>
 
-<section class="panel">
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Özet</th>
-          <th>Ne oldu?</th>
-          <th>Neden önemli?</th>
-          <th>Neden tam algılanamamış olabilir?</th>
-          <th>Ne yapmalıyım?</th>
-          <th>Yanlış alarm olabilir mi?</th>
-          <th>Risk seviyesi</th>
-          <th>Kaynak veri türü</th>
-          <th>Durum</th>
-          <th>Kaynak</th>
-          <th>Cihaz</th>
-          <th>Teknik kayıt</th>
-          <th>Oluşturulma</th>
-          <th>Aksiyon</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in alert_rows %}
-        {% with item=row.alert explanation=row.explanation %}
-        <tr>
-          <td>{{ explanation.summary }}</td>
-          <td>{{ explanation.what_happened }}</td>
-          <td>{{ explanation.why_important }}</td>
-          <td>{{ explanation.why_incomplete|default:"-" }}</td>
-          <td>{{ explanation.what_to_do }}</td>
-          <td>{{ explanation.false_positive }}</td>
-          <td><span class="badge severity-{{ item.severity }}">{{ explanation.risk_level }}</span></td>
-          <td>{{ explanation.source_data_type }}</td>
-          <td>{{ item.get_status_display }}</td>
-          <td>{{ item.source_ip|default:"-" }}<br>{{ item.source_mac|default:"-" }}</td>
-          <td>{% if item.device %}<a href="{% url 'dashboard:device_detail' item.device.pk %}">{{ item.device.ip_address }}</a>{% else %}-{% endif %}</td>
-          <td><strong>{{ item.title }}</strong><br>{{ item.message }}</td>
-          <td>{{ item.created_at|date:"d.m.Y H:i" }}</td>
-          <td>
-            <form method="post" action="{% url 'dashboard:update_alert_status' item.pk %}">
-              {% csrf_token %}
-              <input type="hidden" name="next" value="{{ request.get_full_path }}">
-              <button name="status" value="acknowledged" type="submit">İncelendi</button>
-              <button name="status" value="resolved" type="submit">Çözüldü</button>
-              <button name="status" value="active" type="submit">Aktif yap</button>
-            </form>
-          </td>
-        </tr>
-        {% endwith %}
-        {% empty %}
-        <tr>
-          <td colspan="14">Henüz olay yok. Sistem normal görünüyor.</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+<section class="alert-list">
+  {% for row in alert_rows %}
+  {% with item=row.alert explanation=row.explanation %}
+  <article class="alert-card panel">
+    <div class="alert-card-head">
+      <div>
+        <h2>{{ explanation.summary }}</h2>
+        <p>{{ item.title }}</p>
+      </div>
+      <div class="alert-meta">
+        <span class="badge severity-{{ item.severity }}">{{ explanation.risk_level }}</span>
+        <span class="badge status-{{ item.status }}">{{ item.get_status_display }}</span>
+      </div>
+    </div>
+    <div class="summary-grid">
+      <span><strong>Kaynak veri türü</strong>{{ explanation.source_data_type }}</span>
+      <span><strong>Kaynak IP / cihaz</strong>{{ item.source_ip|default:"-" }}{% if item.device %} · <a href="{% url 'dashboard:device_detail' item.device.pk %}">{{ item.device.ip_address }}</a>{% endif %}</span>
+      <span><strong>Oluşturulma</strong>{{ item.created_at|date:"d.m.Y H:i" }}</span>
+    </div>
+    <details>
+      <summary>Detayları göster</summary>
+      <div class="detail-grid">
+        <p><strong>Ne oldu?</strong>{{ explanation.what_happened }}</p>
+        <p><strong>Neden önemli?</strong>{{ explanation.why_important }}</p>
+        <p><strong>Neden tam algılanamamış olabilir?</strong>{{ explanation.why_incomplete|default:"-" }}</p>
+        <p><strong>Ne yapmalıyım?</strong>{{ explanation.what_to_do }}</p>
+        <p><strong>Yanlış alarm olabilir mi?</strong>{{ explanation.false_positive }}</p>
+        <p><strong>Teknik kayıt</strong>{{ item.message }}</p>
+      </div>
+    </details>
+    <form class="action-row" method="post" action="{% url 'dashboard:update_alert_status' item.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="next" value="{{ request.get_full_path }}">
+      <button name="status" value="acknowledged" type="submit">İncelendi</button>
+      <button name="status" value="resolved" type="submit">Çözüldü</button>
+      <button name="status" value="active" type="submit">Aktif yap</button>
+    </form>
+  </article>
+  {% endwith %}
+  {% empty %}
+  <section class="panel">
+    <p>Henüz olay yok. Sistem normal görünüyor.</p>
+  </section>
+  {% endfor %}
 </section>
 {% endblock %}

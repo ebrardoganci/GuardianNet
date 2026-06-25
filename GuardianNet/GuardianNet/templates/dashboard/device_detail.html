@@ -5,7 +5,7 @@
 <section class="panel">
   <div class="stats">
     <article><span>IP</span><strong>{{ device.ip_address }}</strong><small>{{ device.hostname|default:'Hostname yok' }}</small></article>
-    <article><span>MAC</span><strong>{{ device.mac_address|default:'-' }}</strong><small>{{ device.vendor|default:'Vendor yok' }}</small></article>
+    <article><span>MAC</span><strong>{{ mac.value }}</strong><small>{% if mac.note %}{{ mac.note }}{% else %}{{ device.vendor|default:'Vendor yok' }}{% endif %}</small></article>
     <article><span>Durum</span><strong>{{ device.get_status_display }}</strong><small>Son taramada {% if inventory.seen_in_last_scan %}görüldü{% else %}görülmedi{% endif %}</small></article>
     <article><span>Uyarı</span><strong>{{ inventory.active_alert_count }}</strong><small>Aktif ilişkili uyarı</small></article>
   </div>
@@ -43,6 +43,8 @@
         {% endfor %}
       </tbody>
     </table>
+    <article><span>Algılama kaynağı</span><strong>{{ detection_source }}</strong><small>Son kayıtlı gözlem kaynağı</small></article>
+    <article><span>MAC kaynağı</span><strong>{{ mac.source }}</strong><small>{% if mac.note %}{{ mac.note }}{% else %}Gerçek ARP kaydı{% endif %}</small></article>
   </div>
 </section>
 <div class="grid-2">

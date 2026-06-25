@@ -4,21 +4,31 @@
 <h1>Ayarlar</h1>
 <div class="grid-2">
   <section class="panel form-panel">
-    <h2>Çalışma Ayarları</h2>
+    <h2>Ağ Ayarları</h2>
     <form method="post">{% csrf_token %}
       <label>Çalışma modu
         <input value="Real" disabled>
       </label>
-      <label>İzinli yerel subnet (boşsa otomatik, otomatik ağ /24 ile sınırlıdır)<input name="local_subnet" value="{{ local_subnet }}" placeholder="192.168.1.0/24"></label>
+      <label>İzinli yerel subnet (boşsa otomatik, otomatik ağ /24 ile sınırlıdır)
+        <input name="local_subnet" value="{{ local_subnet }}" placeholder="192.168.1.0/24" {% if local_subnet_locked %}disabled{% endif %}>
+        <small>Subnet değişikliğini net test etmek için eski cihaz kayıtlarını temizleyip yeniden tarama yapın.</small>
+        {% if local_subnet_locked %}<small>Bu değer LOCAL_SUBNET ortam değişkeni tarafından sabitlenmiştir.</small>{% endif %}
+      </label>
+      <label>Monitoring cycle scan limit
+        <input type="number" min="1" name="monitoring_cycle_scan_limit" value="{{ monitoring_cycle_scan_limit }}" placeholder="opsiyonel">
+        <small>Scan limit aktif tarama hedeflerini sınırlar; ARP tablosundan görülen cihazlar ayrıca görünebilir.</small>
+      </label>
       <label>Tarama aralığı (saniye)<input type="number" min="30" name="scan_interval_seconds" value="{{ scan_interval_seconds }}"></label>
       <label>OpenCanary log yolu<input name="opencanary_log_path" value="{{ opencanary_log_path }}"></label>
+      <h2>Tarama Motorları</h2>
       <label><input type="checkbox" name="enable_real_scan" {% if enable_real_scan %}checked{% endif %}> Gerçek cihaz keşfini etkinleştir</label>
+      <h2>Honeypot / OpenCanary</h2>
       <label><input type="checkbox" name="enable_honeypot_logs" {% if enable_honeypot_logs %}checked{% endif %}> Honeypot loglarını etkinleştir</label>
       <button type="submit">Kaydet</button>
     </form>
   </section>
   <section class="panel">
-    <h2>Sistem Durumu</h2>
+    <h2>Son Çalışma Bilgileri</h2>
     <p>Kullanılan subnet: <strong>{{ used_subnet }}</strong></p>
     <p>Gerçek tarama: <strong>{{ enable_real_scan|yesno:'Aktif,Kapalı' }}</strong></p>
     <p>Honeypot: <strong>{{ honeypot_status.label }}</strong></p>
@@ -46,6 +56,13 @@
 </section>
 <section class="panel">
   <h2>Sistem Sağlığı</h2>
+  <div class="filter-pills">
+    <span>Ağ Ayarları</span>
+    <span>Tarama Motorları</span>
+    <span>Honeypot / OpenCanary</span>
+    <span>Son Çalışma Bilgileri</span>
+    <span>Veri Yönetimi</span>
+  </div>
   <div class="table-wrap">
     <table>
       <thead>
